@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "roblox-studio-official": {
+      "command": "cmd",
+      "args": ["/c", "C:\\Users\\howar\\AppData\\Local\\Roblox\\mcp.bat", "--stdio"]
+    },
+    "robloxstudio-mcp": {
+      "command": "npx",
+      "args": ["-y", "robloxstudio-mcp@latest"]
+    }
+  }
+}

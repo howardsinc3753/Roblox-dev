@@ -1,0 +1,295 @@
+--!strict
+-- In-game HUD: health bar, boost meter, coin counter, kill feed,
+-- round timer, scoreboard, cooldown indicators.
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+
+local HUD = {}
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
+
+local screenGui: ScreenGui
+local healthBar: Frame
+local healthFill: Frame
+local boostBar: Frame
+local boostFill: Frame
+local coinLabel: TextLabel
+local roundTimerLabel: TextLabel
+local killFeedFrame: Frame
+local breathCooldownFrame: Frame
+local specialCooldownFrame: Frame
+local dragonNameLabel: TextLabel
+
+function HUD.create()
+	screenGui = Instance.new("ScreenGui")
+	screenGui.Name = "DragonWarzHUD"
+	screenGui.ResetOnSpawn = false
+	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	screenGui.Parent = playerGui
+
+	-- === HEALTH BAR (bottom center) ===
+	healthBar = Instance.new("Frame")
+	healthBar.Name = "HealthBar"
+	healthBar.Size = UDim2.new(0.3, 0, 0, 20)
+	healthBar.Position = UDim2.new(0.35, 0, 0.92, 0)
+	healthBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	healthBar.BorderSizePixel = 0
+	healthBar.Parent = screenGui
+
+	local healthCorner = Instance.new("UICorner")
+	healthCorner.CornerRadius = UDim.new(0, 6)
+	healthCorner.Parent = healthBar
+
+	healthFill = Instance.new("Frame")
+	healthFill.Name = "Fill"
+	healthFill.Size = UDim2.fromScale(1, 1)
+	healthFill.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+	healthFill.BorderSizePixel = 0
+	healthFill.Parent = healthBar
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(0, 6)
+	fillCorner.Parent = healthFill
+
+	local healthText = Instance.new("TextLabel")
+	healthText.Name = "Text"
+	healthText.Size = UDim2.fromScale(1, 1)
+	healthText.BackgroundTransparency = 1
+	healthText.Text = "100/100"
+	healthText.TextColor3 = Color3.new(1, 1, 1)
+	healthText.TextStrokeTransparency = 0
+	healthText.Font = Enum.Font.GothamBold
+	healthText.TextScaled = true
+	healthText.Parent = healthBar
+
+	-- === BOOST BAR (below health) ===
+	boostBar = Instance.new("Frame")
+	boostBar.Name = "BoostBar"
+	boostBar.Size = UDim2.new(0.2, 0, 0, 10)
+	boostBar.Position = UDim2.new(0.4, 0, 0.95, 0)
+	boostBar.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	boostBar.BorderSizePixel = 0
+	boostBar.Parent = screenGui
+
+	local boostCorner = Instance.new("UICorner")
+	boostCorner.CornerRadius = UDim.new(0, 4)
+	boostCorner.Parent = boostBar
+
+	boostFill = Instance.new("Frame")
+	boostFill.Name = "Fill"
+	boostFill.Size = UDim2.fromScale(1, 1)
+	boostFill.BackgroundColor3 = Color3.fromRGB(50, 150, 255)
+	boostFill.BorderSizePixel = 0
+	boostFill.Parent = boostBar
+
+	local boostFillCorner = Instance.new("UICorner")
+	boostFillCorner.CornerRadius = UDim.new(0, 4)
+	boostFillCorner.Parent = boostFill
+
+	-- === COINS (top right) ===
+	coinLabel = Instance.new("TextLabel")
+	coinLabel.Name = "Coins"
+	coinLabel.Size = UDim2.fromOffset(200, 40)
+	coinLabel.Position = UDim2.new(1, -210, 0, 10)
+	coinLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	coinLabel.BackgroundTransparency = 0.3
+	coinLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	coinLabel.Text = "0 coins"
+	coinLabel.Font = Enum.Font.GothamBold
+	coinLabel.TextScaled = true
+	coinLabel.Parent = screenGui
+
+	local coinCorner = Instance.new("UICorner")
+	coinCorner.CornerRadius = UDim.new(0, 8)
+	coinCorner.Parent = coinLabel
+
+	-- === ROUND TIMER (top center) ===
+	roundTimerLabel = Instance.new("TextLabel")
+	roundTimerLabel.Name = "RoundTimer"
+	roundTimerLabel.Size = UDim2.fromOffset(300, 50)
+	roundTimerLabel.Position = UDim2.new(0.5, -150, 0, 10)
+	roundTimerLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	roundTimerLabel.BackgroundTransparency = 0.3
+	roundTimerLabel.TextColor3 = Color3.new(1, 1, 1)
+	roundTimerLabel.Text = "Waiting for round..."
+	roundTimerLabel.Font = Enum.Font.GothamBold
+	roundTimerLabel.TextScaled = true
+	roundTimerLabel.Parent = screenGui
+
+	local timerCorner = Instance.new("UICorner")
+	timerCorner.CornerRadius = UDim.new(0, 8)
+	timerCorner.Parent = roundTimerLabel
+
+	-- === DRAGON NAME (top left) ===
+	dragonNameLabel = Instance.new("TextLabel")
+	dragonNameLabel.Name = "DragonName"
+	dragonNameLabel.Size = UDim2.fromOffset(250, 40)
+	dragonNameLabel.Position = UDim2.new(0, 10, 0, 10)
+	dragonNameLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	dragonNameLabel.BackgroundTransparency = 0.3
+	dragonNameLabel.TextColor3 = Color3.new(1, 1, 1)
+	dragonNameLabel.Text = "Ember (Fire)"
+	dragonNameLabel.Font = Enum.Font.GothamBold
+	dragonNameLabel.TextScaled = true
+	dragonNameLabel.Parent = screenGui
+
+	local nameCorner = Instance.new("UICorner")
+	nameCorner.CornerRadius = UDim.new(0, 8)
+	nameCorner.Parent = dragonNameLabel
+
+	-- === KILL FEED (top right, below coins) ===
+	killFeedFrame = Instance.new("Frame")
+	killFeedFrame.Name = "KillFeed"
+	killFeedFrame.Size = UDim2.fromOffset(300, 200)
+	killFeedFrame.Position = UDim2.new(1, -310, 0, 60)
+	killFeedFrame.BackgroundTransparency = 1
+	killFeedFrame.Parent = screenGui
+
+	local killLayout = Instance.new("UIListLayout")
+	killLayout.SortOrder = Enum.SortOrder.LayoutOrder
+	killLayout.VerticalAlignment = Enum.VerticalAlignment.Top
+	killLayout.Padding = UDim.new(0, 2)
+	killLayout.Parent = killFeedFrame
+
+	-- === COOLDOWN INDICATORS (bottom left) ===
+	breathCooldownFrame = Instance.new("Frame")
+	breathCooldownFrame.Name = "BreathCooldown"
+	breathCooldownFrame.Size = UDim2.fromOffset(50, 50)
+	breathCooldownFrame.Position = UDim2.new(0, 20, 0.88, 0)
+	breathCooldownFrame.BackgroundColor3 = Color3.fromRGB(255, 100, 50)
+	breathCooldownFrame.BorderSizePixel = 0
+	breathCooldownFrame.Parent = screenGui
+
+	local breathLabel = Instance.new("TextLabel")
+	breathLabel.Size = UDim2.fromScale(1, 1)
+	breathLabel.BackgroundTransparency = 1
+	breathLabel.Text = "LMB"
+	breathLabel.TextColor3 = Color3.new(1, 1, 1)
+	breathLabel.Font = Enum.Font.GothamBold
+	breathLabel.TextScaled = true
+	breathLabel.Parent = breathCooldownFrame
+
+	local breathCornerUI = Instance.new("UICorner")
+	breathCornerUI.CornerRadius = UDim.new(0, 8)
+	breathCornerUI.Parent = breathCooldownFrame
+
+	specialCooldownFrame = Instance.new("Frame")
+	specialCooldownFrame.Name = "SpecialCooldown"
+	specialCooldownFrame.Size = UDim2.fromOffset(50, 50)
+	specialCooldownFrame.Position = UDim2.new(0, 80, 0.88, 0)
+	specialCooldownFrame.BackgroundColor3 = Color3.fromRGB(100, 50, 255)
+	specialCooldownFrame.BorderSizePixel = 0
+	specialCooldownFrame.Parent = screenGui
+
+	local specialLabel = Instance.new("TextLabel")
+	specialLabel.Size = UDim2.fromScale(1, 1)
+	specialLabel.BackgroundTransparency = 1
+	specialLabel.Text = "E"
+	specialLabel.TextColor3 = Color3.new(1, 1, 1)
+	specialLabel.Font = Enum.Font.GothamBold
+	specialLabel.TextScaled = true
+	specialLabel.Parent = specialCooldownFrame
+
+	local specialCornerUI = Instance.new("UICorner")
+	specialCornerUI.CornerRadius = UDim.new(0, 8)
+	specialCornerUI.Parent = specialCooldownFrame
+
+	-- === CONTROLS HINT (bottom center-left) ===
+	local controlsLabel = Instance.new("TextLabel")
+	controlsLabel.Name = "Controls"
+	controlsLabel.Size = UDim2.fromOffset(350, 30)
+	controlsLabel.Position = UDim2.new(0, 10, 0.98, -5)
+	controlsLabel.AnchorPoint = Vector2.new(0, 1)
+	controlsLabel.BackgroundTransparency = 1
+	controlsLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+	controlsLabel.Text = "WASD: Move | Space/Shift: Up/Down | Q: Boost | LMB: Attack | E: Special"
+	controlsLabel.Font = Enum.Font.Gotham
+	controlsLabel.TextScaled = true
+	controlsLabel.TextXAlignment = Enum.TextXAlignment.Left
+	controlsLabel.Parent = screenGui
+end
+
+function HUD.updateHealth(current: number, max: number)
+	if healthFill then
+		healthFill.Size = UDim2.fromScale(math.clamp(current / max, 0, 1), 1)
+		-- Color: green > yellow > red
+		local pct = current / max
+		if pct > 0.5 then
+			healthFill.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+		elseif pct > 0.25 then
+			healthFill.BackgroundColor3 = Color3.fromRGB(255, 200, 50)
+		else
+			healthFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+		end
+	end
+	local textLabel = healthBar:FindFirstChild("Text") :: TextLabel?
+	if textLabel then
+		textLabel.Text = `{math.floor(current)}/{math.floor(max)}`
+	end
+end
+
+function HUD.updateBoost(percent: number)
+	if boostFill then
+		boostFill.Size = UDim2.fromScale(math.clamp(percent, 0, 1), 1)
+	end
+end
+
+function HUD.updateCoins(coins: number)
+	if coinLabel then
+		coinLabel.Text = `{coins} coins`
+	end
+end
+
+function HUD.updateRoundTimer(text: string)
+	if roundTimerLabel then
+		roundTimerLabel.Text = text
+	end
+end
+
+function HUD.setDragon(dragonId: string)
+	local dragon = DragonConfig[dragonId]
+	if dragon and dragonNameLabel then
+		dragonNameLabel.Text = `{dragon.name} ({dragon.element})`
+		dragonNameLabel.TextColor3 = dragon.color
+	end
+end
+
+function HUD.updateCooldowns(breathPct: number, specialPct: number)
+	if breathCooldownFrame then
+		breathCooldownFrame.BackgroundTransparency = if breathPct >= 1 then 0 else 0.6
+	end
+	if specialCooldownFrame then
+		specialCooldownFrame.BackgroundTransparency = if specialPct >= 1 then 0 else 0.6
+	end
+end
+
+function HUD.addKillFeed(killerName: string, victimName: string)
+	if not killFeedFrame then return end
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0, 20)
+	label.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	label.BackgroundTransparency = 0.4
+	label.TextColor3 = Color3.new(1, 1, 1)
+	label.Text = `{killerName} eliminated {victimName}`
+	label.Font = Enum.Font.Gotham
+	label.TextScaled = true
+	label.Parent = killFeedFrame
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 4)
+	corner.Parent = label
+
+	-- Fade out and remove after 5 seconds
+	task.delay(5, function()
+		if label and label.Parent then
+			label:Destroy()
+		end
+	end)
+end
+
+return HUD

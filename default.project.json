@@ -1,11 +1,10 @@
 {
-  "name": "roblox-game",
+  "name": "Dragon-Warz",
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
-      "Shared": { "$path": "src/shared" },
-      "Packages": { "$path": "Packages" }
+      "Shared": { "$path": "src/shared" }
     },
     "ServerScriptService": {
       "$className": "ServerScriptService",

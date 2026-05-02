@@ -1,0 +1,223 @@
+--!strict
+-- Creates and manages dragon character models for players.
+-- Dragons are simple Part-based models (replaced with meshes later).
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+
+local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+
+local DragonSpawner = {}
+
+-- Spawn points (positions in the arena)
+local SPAWN_POINTS = {
+	Vector3.new(0, 50, 0),
+	Vector3.new(100, 60, 100),
+	Vector3.new(-100, 55, 100),
+	Vector3.new(100, 65, -100),
+	Vector3.new(-100, 50, -100),
+	Vector3.new(0, 70, 150),
+}
+
+local function getRandomSpawnPoint(): Vector3
+	return SPAWN_POINTS[math.random(1, #SPAWN_POINTS)]
+end
+
+-- Build a simple dragon model from parts (placeholder until meshes)
+local function buildDragonModel(dragonId: string, player: Player): Model
+	local dragon = DragonConfig[dragonId]
+	if not dragon then
+		dragon = DragonConfig.Ember
+	end
+
+	local model = Instance.new("Model")
+	model.Name = `Dragon_{player.Name}`
+
+	-- Body (main part — acts as HumanoidRootPart)
+	local body = Instance.new("Part")
+	body.Name = "HumanoidRootPart"
+	body.Size = Vector3.new(6, 4, 10)
+	body.Shape = Enum.PartType.Block
+	body.Color = dragon.color
+	body.Material = Enum.Material.SmoothPlastic
+	body.Anchored = false
+	body.CanCollide = true
+	body.Parent = model
+
+	-- Head
+	local head = Instance.new("Part")
+	head.Name = "Head"
+	head.Size = Vector3.new(3, 3, 4)
+	head.Shape = Enum.PartType.Ball
+	head.Color = dragon.color
+	head.Material = Enum.Material.SmoothPlastic
+	head.Anchored = false
+	head.CanCollide = false
+	head.Parent = model
+
+	local headWeld = Instance.new("WeldConstraint")
+	headWeld.Part0 = body
+	headWeld.Part1 = head
+	headWeld.Parent = head
+	head.CFrame = body.CFrame * CFrame.new(0, 1, -6)
+
+	-- Wings (left)
+	local wingL = Instance.new("Part")
+	wingL.Name = "WingLeft"
+	wingL.Size = Vector3.new(8, 0.5, 5)
+	wingL.Color = dragon.secondaryColor
+	wingL.Material = Enum.Material.SmoothPlastic
+	wingL.Anchored = false
+	wingL.CanCollide = false
+	wingL.Parent = model
+
+	local wingLWeld = Instance.new("WeldConstraint")
+	wingLWeld.Part0 = body
+	wingLWeld.Part1 = wingL
+	wingLWeld.Parent = wingL
+	wingL.CFrame = body.CFrame * CFrame.new(-7, 1, 0)
+
+	-- Wings (right)
+	local wingR = Instance.new("Part")
+	wingR.Name = "WingRight"
+	wingR.Size = Vector3.new(8, 0.5, 5)
+	wingR.Color = dragon.secondaryColor
+	wingR.Material = Enum.Material.SmoothPlastic
+	wingR.Anchored = false
+	wingR.CanCollide = false
+	wingR.Parent = model
+
+	local wingRWeld = Instance.new("WeldConstraint")
+	wingRWeld.Part0 = body
+	wingRWeld.Part1 = wingR
+	wingRWeld.Parent = wingR
+	wingR.CFrame = body.CFrame * CFrame.new(7, 1, 0)
+
+	-- Tail
+	local tail = Instance.new("Part")
+	tail.Name = "Tail"
+	tail.Size = Vector3.new(2, 2, 8)
+	tail.Color = dragon.secondaryColor
+	tail.Material = Enum.Material.SmoothPlastic
+	tail.Anchored = false
+	tail.CanCollide = false
+	tail.Parent = model
+
+	local tailWeld = Instance.new("WeldConstraint")
+	tailWeld.Part0 = body
+	tailWeld.Part1 = tail
+	tailWeld.Parent = tail
+	tail.CFrame = body.CFrame * CFrame.new(0, 0, 8)
+
+	-- Humanoid (required for Roblox character system)
+	local humanoid = Instance.new("Humanoid")
+	humanoid.MaxHealth = dragon.health
+	humanoid.Health = dragon.health
+	humanoid.WalkSpeed = 0 -- dragons fly, don't walk
+	humanoid.JumpPower = 0
+	humanoid.Parent = model
+
+	-- Name tag
+	local billboardGui = Instance.new("BillboardGui")
+	billboardGui.Name = "NameTag"
+	billboardGui.Size = UDim2.fromOffset(200, 50)
+	billboardGui.StudsOffset = Vector3.new(0, 5, 0)
+	billboardGui.Adornee = body
+	billboardGui.Parent = model
+
+	local nameLabel = Instance.new("TextLabel")
+	nameLabel.Size = UDim2.fromScale(1, 0.6)
+	nameLabel.Text = player.Name
+	nameLabel.TextColor3 = Color3.new(1, 1, 1)
+	nameLabel.TextStrokeTransparency = 0
+	nameLabel.BackgroundTransparency = 1
+	nameLabel.TextScaled = true
+	nameLabel.Font = Enum.Font.GothamBold
+	nameLabel.Parent = billboardGui
+
+	local dragonLabel = Instance.new("TextLabel")
+	dragonLabel.Size = UDim2.fromScale(1, 0.4)
+	dragonLabel.Position = UDim2.fromScale(0, 0.6)
+	dragonLabel.Text = `{dragon.name} ({dragon.element})`
+	dragonLabel.TextColor3 = dragon.color
+	dragonLabel.TextStrokeTransparency = 0
+	dragonLabel.BackgroundTransparency = 1
+	dragonLabel.TextScaled = true
+	dragonLabel.Font = Enum.Font.Gotham
+	dragonLabel.Parent = billboardGui
+
+	-- Health bar
+	local healthGui = Instance.new("BillboardGui")
+	healthGui.Name = "HealthBar"
+	healthGui.Size = UDim2.fromOffset(150, 15)
+	healthGui.StudsOffset = Vector3.new(0, 4, 0)
+	healthGui.Adornee = body
+	healthGui.Parent = model
+
+	local healthBg = Instance.new("Frame")
+	healthBg.Size = UDim2.fromScale(1, 1)
+	healthBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	healthBg.BorderSizePixel = 0
+	healthBg.Parent = healthGui
+
+	local healthCorner = Instance.new("UICorner")
+	healthCorner.CornerRadius = UDim.new(0, 4)
+	healthCorner.Parent = healthBg
+
+	local healthFill = Instance.new("Frame")
+	healthFill.Name = "Fill"
+	healthFill.Size = UDim2.fromScale(1, 1)
+	healthFill.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+	healthFill.BorderSizePixel = 0
+	healthFill.Parent = healthBg
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(0, 4)
+	fillCorner.Parent = healthFill
+
+	model.PrimaryPart = body
+	return model
+end
+
+function DragonSpawner.spawn(player: Player, dragonId: string): Model
+	-- Remove old character if any
+	if player.Character then
+		player.Character:Destroy()
+	end
+
+	local model = buildDragonModel(dragonId, player)
+	local spawnPos = getRandomSpawnPoint()
+	model:PivotTo(CFrame.new(spawnPos))
+	model.Parent = game.Workspace
+
+	player.Character = model
+
+	-- Set up BodyMovers for flight
+	local rootPart = model.PrimaryPart :: BasePart
+	rootPart.Anchored = false
+
+	-- BodyVelocity for movement
+	local bodyVelocity = Instance.new("BodyVelocity")
+	bodyVelocity.Name = "FlightVelocity"
+	bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+	bodyVelocity.Velocity = Vector3.zero
+	bodyVelocity.P = 5000
+	bodyVelocity.Parent = rootPart
+
+	-- BodyGyro for rotation
+	local bodyGyro = Instance.new("BodyGyro")
+	bodyGyro.Name = "FlightGyro"
+	bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+	bodyGyro.CFrame = CFrame.new(spawnPos)
+	bodyGyro.P = 10000
+	bodyGyro.D = 500
+	bodyGyro.Parent = rootPart
+
+	return model
+end
+
+function DragonSpawner.getRandomSpawnPoint(): Vector3
+	return getRandomSpawnPoint()
+end
+
+return DragonSpawner
