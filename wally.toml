@@ -1,0 +1,14 @@
+[package]
+name = "howardsinc/roblox-game"
+version = "0.1.0"
+realm = "shared"
+registry = "https://github.com/UpliftGames/wally-index"
+
+[dependencies]
+# React = "jsdotlua/react@17.1.0"
+# ReactRoblox = "jsdotlua/react-roblox@17.1.0"
+# Promise = "evaera/promise@4.0.0"
+# Signal = "sleitnick/signal@1.5.0"
+
+[dev-dependencies]
+# JestGlobals = "jsdotlua/jest-globals@3.10.0"

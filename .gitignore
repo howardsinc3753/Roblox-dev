@@ -1,0 +1,51 @@
+# Roblox / Wally packages (regenerated from wally.lock)
+Packages/
+ServerPackages/
+DevPackages/
+
+# Build output
+build/
+
+# Generated voiceover MP3s (regenerated from lines.json via ElevenLabs)
+voiceover/out/
+
+# Roblox place files (built by Rojo, edited in Studio)
+*.rbxl
+*.rbxlx
+# Uncomment below if you want to version-control specific place files:
+# !game.rbxlx
+
+# Node modules (if using roblox-ts or npm tools)
+node_modules/
+package-lock.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Secrets (NEVER commit)
+.env
+.env.local
+*.pem
+*.key
+secrets.yaml
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Rokit binaries cache (managed by rokit)
+.rokit/
