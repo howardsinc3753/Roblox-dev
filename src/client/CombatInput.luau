@@ -7,9 +7,21 @@ local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+local SoundService = game:GetService("SoundService")
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 
 local CombatInput = {}
+
+-- Quick local sound play for immediate feedback
+local function playQuickSound(soundId: string, volume: number, pitch: number)
+	local sound = Instance.new("Sound")
+	sound.SoundId = soundId
+	sound.Volume = volume
+	sound.PlaybackSpeed = pitch
+	sound.Parent = SoundService
+	sound:Play()
+	sound.Ended:Connect(function() sound:Destroy() end)
+end
 
 local player = Players.LocalPlayer
 local camera = game.Workspace.CurrentCamera
@@ -121,10 +133,11 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 			fireBreathRemote:FireServer(origin, direction)
 		end
 
-		-- Visual effect
+		-- Visual effect + sound
 		local dragon = DragonConfig[currentDragonId]
 		if dragon then
 			createBreathEffect(origin, direction, dragon.color)
+			playQuickSound("rbxassetid://5765933027", 0.6, 1.2)
 		end
 	end
 

@@ -17,6 +17,8 @@ return {
 	UpdateCoins = "UpdateCoins",
 	SpawnDragon = "SpawnDragon",
 	UpdateScoreboard = "UpdateScoreboard",
+	SyncTimer = "SyncTimer",
+	SpecialEffect = "SpecialEffect",
 
 	-- Client → Server (RemoteFunctions)
 	GetPlayerData = "GetPlayerData",

@@ -31,6 +31,44 @@ function HUD.create()
 	screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	screenGui.Parent = playerGui
 
+	-- === CROSSHAIR (center of screen) ===
+	local crosshair = Instance.new("Frame")
+	crosshair.Name = "Crosshair"
+	crosshair.Size = UDim2.fromOffset(30, 30)
+	crosshair.Position = UDim2.new(0.5, -15, 0.5, -15)
+	crosshair.BackgroundTransparency = 1
+	crosshair.Parent = screenGui
+
+	-- Horizontal line
+	local hLine = Instance.new("Frame")
+	hLine.Size = UDim2.fromOffset(24, 2)
+	hLine.Position = UDim2.new(0.5, -12, 0.5, -1)
+	hLine.BackgroundColor3 = Color3.new(1, 1, 1)
+	hLine.BackgroundTransparency = 0.2
+	hLine.BorderSizePixel = 0
+	hLine.Parent = crosshair
+
+	-- Vertical line
+	local vLine = Instance.new("Frame")
+	vLine.Size = UDim2.fromOffset(2, 24)
+	vLine.Position = UDim2.new(0.5, -1, 0.5, -12)
+	vLine.BackgroundColor3 = Color3.new(1, 1, 1)
+	vLine.BackgroundTransparency = 0.2
+	vLine.BorderSizePixel = 0
+	vLine.Parent = crosshair
+
+	-- Center dot
+	local centerDot = Instance.new("Frame")
+	centerDot.Size = UDim2.fromOffset(4, 4)
+	centerDot.Position = UDim2.new(0.5, -2, 0.5, -2)
+	centerDot.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+	centerDot.BorderSizePixel = 0
+	centerDot.Parent = crosshair
+
+	local dotCorner = Instance.new("UICorner")
+	dotCorner.CornerRadius = UDim.new(1, 0)
+	dotCorner.Parent = centerDot
+
 	-- === HEALTH BAR (bottom center) ===
 	healthBar = Instance.new("Frame")
 	healthBar.Name = "HealthBar"

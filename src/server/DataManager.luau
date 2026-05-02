@@ -1,6 +1,6 @@
 --!strict
 -- Handles player data loading, saving, and in-memory cache.
--- Uses DataStoreService for persistence.
+-- Uses DataStoreService for persistence. Includes auto-save loop.
 
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
@@ -9,13 +9,23 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PlayerDataTemplate = require(ReplicatedStorage.Shared.Modules:WaitForChild("PlayerDataTemplate"))
 
 local DATA_STORE_NAME = "DragonWarz_PlayerData_v1"
-local SAVE_INTERVAL = 60 -- auto-save every 60 seconds
+local SAVE_INTERVAL = 60
 
 local DataManager = {}
 
--- In-memory cache: userId → PlayerData
 local cache: { [number]: PlayerDataTemplate.PlayerData } = {}
 local dataStore = DataStoreService:GetDataStore(DATA_STORE_NAME)
+
+-- Deep merge: recursively fill in missing keys from default
+local function deepMerge(target: any, default: any)
+	for key, defaultValue in default do
+		if target[key] == nil then
+			target[key] = defaultValue
+		elseif typeof(defaultValue) == "table" and typeof(target[key]) == "table" then
+			deepMerge(target[key], defaultValue)
+		end
+	end
+end
 
 function DataManager.loadPlayer(player: Player): PlayerDataTemplate.PlayerData
 	local userId = player.UserId
@@ -26,13 +36,8 @@ function DataManager.loadPlayer(player: Player): PlayerDataTemplate.PlayerData
 	end)
 
 	if ok and result then
-		-- Merge with default to handle schema migrations
 		local default = PlayerDataTemplate.getDefault()
-		for key, value in default :: any do
-			if (result :: any)[key] == nil then
-				(result :: any)[key] = value
-			end
-		end
+		deepMerge(result, default)
 		data = result :: PlayerDataTemplate.PlayerData
 	else
 		if not ok then
@@ -48,9 +53,7 @@ end
 function DataManager.savePlayer(player: Player): boolean
 	local userId = player.UserId
 	local data = cache[userId]
-	if not data then
-		return false
-	end
+	if not data then return false end
 
 	local ok, err = pcall(function()
 		dataStore:SetAsync(`player_{userId}`, data)
@@ -60,7 +63,6 @@ function DataManager.savePlayer(player: Player): boolean
 		warn(`[DataManager] Failed to save data for {player.Name}: {err}`)
 		return false
 	end
-
 	return true
 end
 
@@ -83,6 +85,19 @@ end
 function DataManager.getCoins(player: Player): number
 	local data = cache[player.UserId]
 	return if data then data.coins else 0
+end
+
+-- Auto-save all online players periodically
+function DataManager.startAutoSave()
+	task.spawn(function()
+		while true do
+			task.wait(SAVE_INTERVAL)
+			for _, player in Players:GetPlayers() do
+				DataManager.savePlayer(player)
+			end
+			print(`[DataManager] Auto-saved {#Players:GetPlayers()} players`)
+		end
+	end)
 end
 
 return DataManager

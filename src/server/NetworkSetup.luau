@@ -23,6 +23,8 @@ local function setup()
 		RemoteNames.UpdateCoins,
 		RemoteNames.SpawnDragon,
 		RemoteNames.UpdateScoreboard,
+		RemoteNames.SyncTimer,
+		RemoteNames.SpecialEffect,
 	}
 
 	for _, name in eventNames do

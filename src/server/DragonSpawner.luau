@@ -192,26 +192,33 @@ function DragonSpawner.spawn(player: Player, dragonId: string): Model
 
 	player.Character = model
 
-	-- Set up BodyMovers for flight
+	-- Set up constraints for flight (modern API, replaces deprecated BodyMovers)
 	local rootPart = model.PrimaryPart :: BasePart
 	rootPart.Anchored = false
 
-	-- BodyVelocity for movement
-	local bodyVelocity = Instance.new("BodyVelocity")
-	bodyVelocity.Name = "FlightVelocity"
-	bodyVelocity.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
-	bodyVelocity.Velocity = Vector3.zero
-	bodyVelocity.P = 5000
-	bodyVelocity.Parent = rootPart
+	-- Attachment for constraints
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "FlightAttachment"
+	attachment.Parent = rootPart
 
-	-- BodyGyro for rotation
-	local bodyGyro = Instance.new("BodyGyro")
-	bodyGyro.Name = "FlightGyro"
-	bodyGyro.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
-	bodyGyro.CFrame = CFrame.new(spawnPos)
-	bodyGyro.P = 10000
-	bodyGyro.D = 500
-	bodyGyro.Parent = rootPart
+	-- LinearVelocity for movement (replaces BodyVelocity)
+	local linearVelocity = Instance.new("LinearVelocity")
+	linearVelocity.Name = "FlightVelocity"
+	linearVelocity.Attachment0 = attachment
+	linearVelocity.MaxForce = math.huge
+	linearVelocity.VectorVelocity = Vector3.zero
+	linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	linearVelocity.Parent = rootPart
+
+	-- AlignOrientation for rotation (replaces BodyGyro)
+	local alignOrientation = Instance.new("AlignOrientation")
+	alignOrientation.Name = "FlightGyro"
+	alignOrientation.Attachment0 = attachment
+	alignOrientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	alignOrientation.MaxTorque = math.huge
+	alignOrientation.Responsiveness = 20
+	alignOrientation.CFrame = CFrame.new(spawnPos)
+	alignOrientation.Parent = rootPart
 
 	return model
 end

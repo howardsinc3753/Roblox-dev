@@ -15,8 +15,12 @@ local CombatManager = require(script.CombatManager)
 local RoundManager = require(script.RoundManager)
 local DragonSpawner = require(script.DragonSpawner)
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+local ArenaBuilder = require(script.ArenaBuilder)
 
 print("[Server] Dragon Warz server starting...")
+
+-- Build the arena first
+ArenaBuilder.build()
 
 -- Helper to get a remote
 local function getRemote(name: string): RemoteEvent
@@ -39,6 +43,8 @@ local roundEndRemote = getRemote("RoundEnd")
 local updateCoinsRemote = getRemote("UpdateCoins")
 local spawnDragonRemote = getRemote("SpawnDragon")
 local updateScoreboardRemote = getRemote("UpdateScoreboard")
+local syncTimerRemote = getRemote("SyncTimer")
+local specialEffectRemote = getRemote("SpecialEffect")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 
 -- ================================
@@ -83,7 +89,6 @@ selectDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 	local data = DataManager.getData(player)
 	if not data then return end
 
-	-- Validate dragon exists and is unlocked
 	if not DragonConfig[id] then return end
 	if not data.unlockedDragons[id] then return end
 
@@ -103,9 +108,8 @@ unlockDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 
 	local data = DataManager.getData(player)
 	if not data then return end
-	if data.unlockedDragons[id] then return end -- already owned
-
-	if data.coins < dragon.cost then return end -- can't afford
+	if data.unlockedDragons[id] then return end
+	if data.coins < dragon.cost then return end
 
 	data.coins -= dragon.cost
 	data.unlockedDragons[id] = true
@@ -116,7 +120,6 @@ end)
 -- Breath attack
 fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown, direction: unknown)
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
-
 	if not CombatManager.canFireBreath(player) then return end
 	if not RoundManager.isActive() then return end
 
@@ -135,19 +138,14 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 		damagePlayerRemote:FireAllClients(hitPlayer.UserId, damage)
 
 		if killed then
-			-- Record kill
 			RoundManager.recordKill(player, hitPlayer)
 			DataManager.addCoins(player, 10)
 			updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
 
 			local data = DataManager.getData(player)
-			if data then
-				data.stats.totalKills += 1
-			end
+			if data then data.stats.totalKills += 1 end
 			local victimData = DataManager.getData(hitPlayer)
-			if victimData then
-				victimData.stats.totalDeaths += 1
-			end
+			if victimData then victimData.stats.totalDeaths += 1 end
 
 			playerKORemote:FireAllClients(player.UserId, hitPlayer.UserId)
 			updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
@@ -165,7 +163,7 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	end
 end)
 
--- Special ability
+-- Special ability — all 6 elements implemented
 useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 	if not CombatManager.canUseSpecial(player) then return end
 	if not RoundManager.isActive() then return end
@@ -177,33 +175,96 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 	local dragon = DragonConfig[state.dragonId]
 	if not dragon then return end
 
-	-- Apply special based on element
-	if dragon.element == "Earth" then
-		-- Rock Armor: +50 HP
-		state.health = math.min(state.health + 50, state.maxHealth + 50)
-	elseif dragon.element == "Light" then
-		-- Heal Pulse: heal nearby players
-		local character = player.Character
-		if character and character.PrimaryPart then
-			local pos = character.PrimaryPart.Position
-			for _, otherPlayer in Players:GetPlayers() do
-				if otherPlayer ~= player then
-					local otherChar = otherPlayer.Character
-					if otherChar and otherChar.PrimaryPart then
-						local dist = (otherChar.PrimaryPart.Position - pos).Magnitude
-						if dist < 50 then
-							local otherState = CombatManager.getState(otherPlayer)
-							if otherState and otherState.alive then
-								otherState.health = math.min(otherState.health + 30, otherState.maxHealth)
-							end
-						end
+	local character = player.Character
+	if not character or not character.PrimaryPart then return end
+	local pos = character.PrimaryPart.Position
+
+	if dragon.element == "Fire" then
+		-- Fireball Burst: AoE damage around the player
+		local nearby = CombatManager.findPlayersInRadius(pos, 40, player)
+		for _, target in nearby do
+			local killed, _ = CombatManager.applyDamage(target, dragon.damage * 2)
+			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage * 2)
+			if killed then
+				RoundManager.recordKill(player, target)
+				DataManager.addCoins(player, 10)
+				updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+				playerKORemote:FireAllClients(player.UserId, target.UserId)
+				task.delay(RESPAWN_TIME, function()
+					if target and target.Parent then
+						CombatManager.respawn(target)
+						local tData = DataManager.getData(target)
+						DragonSpawner.spawn(target, if tData then tData.selectedDragon else "Ember")
+					end
+				end)
+			end
+		end
+		specialEffectRemote:FireAllClients(player.UserId, "Fire", pos)
+
+	elseif dragon.element == "Ice" then
+		-- Ice Wall: temporary shield — heal self 40 HP
+		CombatManager.healPlayer(player, 40)
+		specialEffectRemote:FireAllClients(player.UserId, "Ice", pos)
+
+	elseif dragon.element == "Lightning" then
+		-- Chain Lightning: hit up to 3 nearby enemies
+		local nearby = CombatManager.findPlayersInRadius(pos, 60, player)
+		local hitCount = 0
+		for _, target in nearby do
+			if hitCount >= 3 then break end
+			hitCount += 1
+			local killed, _ = CombatManager.applyDamage(target, dragon.damage)
+			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage)
+			if killed then
+				RoundManager.recordKill(player, target)
+				DataManager.addCoins(player, 10)
+				updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+				playerKORemote:FireAllClients(player.UserId, target.UserId)
+				task.delay(RESPAWN_TIME, function()
+					if target and target.Parent then
+						CombatManager.respawn(target)
+						local tData = DataManager.getData(target)
+						DragonSpawner.spawn(target, if tData then tData.selectedDragon else "Ember")
+					end
+				end)
+			end
+		end
+		specialEffectRemote:FireAllClients(player.UserId, "Lightning", pos)
+
+	elseif dragon.element == "Earth" then
+		-- Rock Armor: +50 bonus HP
+		CombatManager.addArmor(player, 50)
+		specialEffectRemote:FireAllClients(player.UserId, "Earth", pos)
+
+	elseif dragon.element == "Dark" then
+		-- Invisibility: make character invisible for 3 seconds
+		specialEffectRemote:FireAllClients(player.UserId, "Dark", pos)
+		-- Server-side: mark temporarily untargetable
+		for _, part in character:GetDescendants() do
+			if part:IsA("BasePart") then
+				(part :: BasePart).Transparency = 1
+			end
+		end
+		task.delay(3, function()
+			if character and character.Parent then
+				local dragonCfg = DragonConfig[state.dragonId]
+				for _, part in character:GetDescendants() do
+					if part:IsA("BasePart") then
+						(part :: BasePart).Transparency = 0
 					end
 				end
 			end
+		end)
+
+	elseif dragon.element == "Light" then
+		-- Heal Pulse: heal self and nearby allies 30 HP
+		CombatManager.healPlayer(player, 30)
+		local nearby = CombatManager.findPlayersInRadius(pos, 50, player)
+		for _, target in nearby do
+			CombatManager.healPlayer(target, 30)
 		end
+		specialEffectRemote:FireAllClients(player.UserId, "Light", pos)
 	end
-	-- Shadow invisibility, Storm chain lightning, Fire AoE, Ice wall
-	-- are handled client-side visually + server validates damage
 end)
 
 -- Get player data (RemoteFunction)
@@ -218,8 +279,8 @@ end
 RoundManager.setCallbacks(
 	-- onRoundStart
 	function()
-		local state = RoundManager.getState()
-		roundStartRemote:FireAllClients(state.roundNumber, 120)
+		local roundState = RoundManager.getState()
+		roundStartRemote:FireAllClients(roundState.roundNumber, 120)
 
 		-- Respawn all players
 		for _, player in Players:GetPlayers() do
@@ -241,7 +302,6 @@ RoundManager.setCallbacks(
 		local winner = RoundManager.getWinner()
 		local scoreboard = RoundManager.getScoreboard()
 
-		-- Award participation coins
 		for _, player in Players:GetPlayers() do
 			DataManager.addCoins(player, 5)
 			updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
@@ -254,7 +314,21 @@ RoundManager.setCallbacks(
 	end
 )
 
+-- Periodic timer sync to clients (every 5 seconds)
+task.spawn(function()
+	while true do
+		task.wait(5)
+		local roundState = RoundManager.getState()
+		if roundState.active then
+			syncTimerRemote:FireAllClients(roundState.timeRemaining, roundState.roundNumber)
+		end
+	end
+end)
+
 -- Start the round loop
 RoundManager.startLoop()
+
+-- Start auto-save loop
+DataManager.startAutoSave()
 
 print("[Server] Dragon Warz server ready!")

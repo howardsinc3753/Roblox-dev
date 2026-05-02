@@ -82,9 +82,9 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not rootPart then return end
 
-	local bodyVelocity = rootPart:FindFirstChild("FlightVelocity") :: BodyVelocity?
-	local bodyGyro = rootPart:FindFirstChild("FlightGyro") :: BodyGyro?
-	if not bodyVelocity or not bodyGyro then return end
+	local linearVelocity = rootPart:FindFirstChild("FlightVelocity") :: LinearVelocity?
+	local alignOrientation = rootPart:FindFirstChild("FlightGyro") :: AlignOrientation?
+	if not linearVelocity or not alignOrientation then return end
 
 	local dragon = DragonConfig[currentDragonId]
 	if not dragon then return end
@@ -120,11 +120,11 @@ RunService.Heartbeat:Connect(function(dt: number)
 		moveDirection = moveDirection.Unit
 	end
 
-	bodyVelocity.Velocity = moveDirection * speed
+	linearVelocity.VectorVelocity = moveDirection * speed
 
-	-- Face the camera direction (yaw only, slight pitch)
+	-- Face the camera direction
 	local targetCF = CFrame.new(rootPart.Position, rootPart.Position + lookVector)
-	bodyGyro.CFrame = targetCF
+	alignOrientation.CFrame = targetCF
 end)
 
 return FlightController
