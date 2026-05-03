@@ -32,7 +32,7 @@ local Dragons: { [string]: DragonStats } = {
 		color = Color3.fromRGB(255, 80, 20),
 		secondaryColor = Color3.fromRGB(255, 200, 50),
 		cost = 0,
-		meshAssetId = 107923746686309, -- Meshy-generated Ember dragon
+		meshAssetId = 115289268931347, -- Meshy-generated Ember (refined + remeshed)
 		meshScale = 4, -- tweak this if dragon appears too small/large
 	},
 	Frost = {
@@ -46,6 +46,8 @@ local Dragons: { [string]: DragonStats } = {
 		color = Color3.fromRGB(100, 180, 255),
 		secondaryColor = Color3.fromRGB(220, 240, 255),
 		cost = 0,
+		meshAssetId = 112674581463196, -- Meshy-generated Frost dragon
+		meshScale = 4, -- match Ember; tweak if proportions look off
 	},
 	Storm = {
 		name = "Storm",
