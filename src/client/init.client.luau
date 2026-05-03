@@ -25,6 +25,7 @@ local HUD = require(script.HUD)
 local SoundManager = require(script.SoundManager)
 local DragonSelectUI = require(script.DragonSelectUI)
 local RoundEndSummary = require(script.RoundEndSummary)
+local LockOnController = require(script.LockOnController)
 local Awareness = require(script.Awareness)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
@@ -37,6 +38,7 @@ SoundManager.startMusic()
 DragonSelectUI.init()
 DragonSelectUI.create()
 RoundEndSummary.create()
+LockOnController.init()
 Awareness.create()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
@@ -529,15 +531,20 @@ RunService.Heartbeat:Connect(function(dt: number)
 	-- so the player always knows where to look for action. Cheap (~10 entities
 	-- max, simple math) so safe to run every frame.
 	Awareness.updateCompass()
+
+	-- Lock-on validity check: clears the lock if target died, despawned, or
+	-- moved out of cone/range. Cheap (~no-op when no lock is active).
+	LockOnController.update()
 end)
 
--- B key: toggle Dragon Select UI mid-round. Without this, solo playtesters
--- are stuck on whatever dragon they spawned with for the full 120s round
--- before the auto-show on RoundEnd lets them switch.
+-- Hotkey handler. Tab is reserved by Roblox for the playerlist UI, so
+-- lock-on uses F (standard fighter-game key). B opens Dragon Select.
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then return end
 	if input.KeyCode == Enum.KeyCode.B then
 		DragonSelectUI.toggle()
+	elseif input.KeyCode == Enum.KeyCode.F then
+		LockOnController.onLockKeyPressed()
 	end
 end)
 
