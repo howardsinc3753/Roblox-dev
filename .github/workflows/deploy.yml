@@ -1,0 +1,54 @@
+name: Deploy to Roblox
+
+# Trigger philosophy:
+#   - push to main → deploy as "Saved" (visible to owner only)
+#   - manually triggered via workflow_dispatch with prod=true → "Published" (live)
+#
+# This means a casual `git push` is safe — bad commits don't auto-ship to
+# players. To go live, you go to GitHub Actions tab and click "Run workflow"
+# with the prod input checked.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      prod:
+        description: "Publish live to all players (instead of Saved-only)"
+        type: boolean
+        required: true
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Rokit installs all the tools pinned in rokit.toml (rojo, lune, wally,
+      # stylua, selene). Same versions as the dev's local machine — no drift
+      # between "works on my computer" and CI.
+      - name: Install Rokit toolchain
+        uses: CompeyDev/setup-rokit@v0.1.2
+        with:
+          version: latest
+
+      - name: Verify rojo + lune installed
+        run: |
+          rojo --version
+          lune --version
+
+      # Run the same script the dev runs locally. CI passes secrets via env
+      # vars; the script reads PLACE_ID + UNIVERSE_ID from there if
+      # deploy.config.json isn't present (it's gitignored, so it won't be).
+      - name: Build + deploy
+        env:
+          ROBLOX_API_KEY: ${{ secrets.ROBLOX_API_KEY }}
+          PLACE_ID: ${{ vars.PLACE_ID }}
+          UNIVERSE_ID: ${{ vars.UNIVERSE_ID }}
+        run: |
+          if [[ "${{ github.event.inputs.prod }}" == "true" ]]; then
+            lune run scripts/deploy.luau --published
+          else
+            lune run scripts/deploy.luau --saved
+          fi

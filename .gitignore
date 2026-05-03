@@ -44,6 +44,12 @@ desktop.ini
 *.key
 secrets.yaml
 
+# Deploy config: contains place + universe IDs (not secret per se, but
+# tied to a specific Roblox account — easier to keep out of git than
+# require everyone to have the same IDs). Use deploy.config.example.json
+# as the template.
+deploy.config.json
+
 # Logs
 *.log
 logs/

@@ -1,0 +1,5 @@
+{
+  "_comment": "Copy this to deploy.config.json (gitignored). Find your IDs in Creator Hub: dashboard.roblox.com/creations -> click your experience -> the URL has /universes/{universeId} and the place card shows the placeId. The deploy script also accepts these as PLACE_ID + UNIVERSE_ID env vars (preferred for CI).",
+  "placeId": "REPLACE_WITH_YOUR_PLACE_ID",
+  "universeId": "REPLACE_WITH_YOUR_UNIVERSE_ID"
+}
