@@ -48,6 +48,65 @@ function SoundManager.play(name: string)
 	end
 end
 
+-- Element-specific layered SFX for special abilities. The previous
+-- single-asset "8-bit explosion" sound was the same for every dragon
+-- regardless of element — pretty unmemorable. By layering the verified
+-- Pro-Sound-Effects assets at element-tuned pitch + volume, each
+-- element's special reads distinctly without needing new asset uploads.
+--
+-- Each entry is a list of (assetId, volume, pitch) tuples — they all
+-- play simultaneously as one "stack" sound. The combinations are tuned
+-- by ear:
+--   - low pitch + explosion = weight (Earth boom, Dark thud)
+--   - high pitch + sparkle = energy (Light shimmer, Ice chime)
+--   - layered whoosh + boom = power (Fire roar, Lightning crack)
+local SPECIAL_SOUNDS_BY_ELEMENT: { [string]: { { id: string, volume: number, pitch: number } } } = {
+	Fire = {
+		{ id = "rbxassetid://9114444008", volume = 2.5, pitch = 0.7 }, -- deep fire whoosh
+		{ id = "rbxassetid://9120705982", volume = 1.8, pitch = 0.85 }, -- explosion underbed
+	},
+	Ice = {
+		{ id = "rbxassetid://9113081793", volume = 1.6, pitch = 1.5 }, -- crystalline whoosh
+		{ id = "rbxassetid://9114444008", volume = 1.0, pitch = 2.4 }, -- shimmer chime overlay
+	},
+	Lightning = {
+		{ id = "rbxassetid://9066114566", volume = 2.0, pitch = 2.0 }, -- electric zap (high pitch 8-bit)
+		{ id = "rbxassetid://9120705982", volume = 1.6, pitch = 1.1 }, -- thunder crack
+	},
+	Earth = {
+		{ id = "rbxassetid://9120705982", volume = 2.5, pitch = 0.4 }, -- deep rumble (very low explosion)
+		{ id = "rbxassetid://9066114566", volume = 1.2, pitch = 0.55 }, -- heavy thud overlay
+	},
+	Dark = {
+		{ id = "rbxassetid://9113081793", volume = 1.8, pitch = 0.55 }, -- sinister whoosh (low airy)
+		{ id = "rbxassetid://9120705982", volume = 1.0, pitch = 0.45 }, -- ominous boom underbed
+	},
+	Light = {
+		{ id = "rbxassetid://9114444008", volume = 1.2, pitch = 2.6 }, -- celestial shimmer
+		{ id = "rbxassetid://9066114566", volume = 1.6, pitch = 1.8 }, -- bright tone overlay
+	},
+}
+
+-- Plays the layered SFX stack for a given element's special. Used by
+-- init.client.luau when specialEffectRemote fires. Falls back to the
+-- generic Special sound if the element key is missing (defensive).
+function SoundManager.playSpecialForElement(element: string)
+	local stack = SPECIAL_SOUNDS_BY_ELEMENT[element]
+	if not stack then
+		SoundManager.play("Special")
+		return
+	end
+	for _, config in stack do
+		local sound = Instance.new("Sound")
+		sound.SoundId = config.id
+		sound.Volume = config.volume
+		sound.PlaybackSpeed = config.pitch
+		sound.Parent = SoundService
+		sound:Play()
+		sound.Ended:Connect(function() sound:Destroy() end)
+	end
+end
+
 -- Background music: "Drinking Horns and Battle Cries" by DistrokidOfficial.
 -- This is a Roblox marketplace asset (DistrokidOfficial is a Roblox music
 -- partner — their tracks are licensed for use in any Roblox experience).

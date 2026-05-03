@@ -401,7 +401,9 @@ local function flashScreenWhite()
 end
 
 specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: string, position: Vector3, direction: Vector3?)
-	SoundManager.play("Special")
+	-- Element-specific layered SFX so each special reads distinctly. Fire is
+	-- a deep whoosh+roar, Ice is crystalline shimmer, Lightning crackles, etc.
+	SoundManager.playSpecialForElement(element)
 	-- Drama: flash the screen on local player casts. Don't flash for
 	-- other players' casts (that'd be visual spam in PvP chaos).
 	if userId == player.UserId then
