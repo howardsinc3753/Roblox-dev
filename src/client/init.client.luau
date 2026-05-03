@@ -70,6 +70,8 @@ local roundEndRemote = remotes:WaitForChild("RoundEnd") :: RemoteEvent
 local updateScoreboardRemote = remotes:WaitForChild("UpdateScoreboard") :: RemoteEvent
 local syncTimerRemote = remotes:WaitForChild("SyncTimer") :: RemoteEvent
 local specialEffectRemote = remotes:WaitForChild("SpecialEffect") :: RemoteEvent
+local damageNPCRemote = remotes:WaitForChild("DamageNPC") :: RemoteEvent
+local npcBreathFiredRemote = remotes:WaitForChild("NPCBreathFired") :: RemoteEvent
 
 -- Dragon spawned/changed
 spawnDragonRemote.OnClientEvent:Connect(function(dragonId: string)
@@ -94,7 +96,37 @@ updateCoinsRemote.OnClientEvent:Connect(function(coins: number)
 	SoundManager.play("Coin")
 end)
 
--- Damage dealt to someone
+-- Reusable floating damage number — used for both player hits and NPC hits.
+-- Adornee accepts any BasePart so we can show numbers above NPC root parts too.
+local function showFloatingDamage(adornee: BasePart, damage: number)
+	local billboardGui = Instance.new("BillboardGui")
+	billboardGui.Size = UDim2.fromOffset(100, 40)
+	billboardGui.StudsOffset = Vector3.new(math.random(-2, 2), 6, 0)
+	billboardGui.Adornee = adornee
+	billboardGui.Parent = adornee
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = `-{damage}`
+	label.TextColor3 = Color3.fromRGB(255, 50, 50)
+	label.TextStrokeTransparency = 0
+	label.Font = Enum.Font.GothamBold
+	label.TextScaled = true
+	label.Parent = billboardGui
+
+	task.spawn(function()
+		for i = 1, 20 do
+			task.wait(0.05)
+			billboardGui.StudsOffset += Vector3.new(0, 0.2, 0)
+			label.TextTransparency = i / 20
+			label.TextStrokeTransparency = i / 20
+		end
+		billboardGui:Destroy()
+	end)
+end
+
+-- Damage dealt to a player (PvP)
 damagePlayerRemote.OnClientEvent:Connect(function(targetUserId: number, damage: number)
 	SoundManager.play("Hit")
 
@@ -102,34 +134,69 @@ damagePlayerRemote.OnClientEvent:Connect(function(targetUserId: number, damage: 
 	if targetPlayer and targetPlayer.Character then
 		local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 		if rootPart then
-			-- Floating damage number
-			local billboardGui = Instance.new("BillboardGui")
-			billboardGui.Size = UDim2.fromOffset(100, 40)
-			billboardGui.StudsOffset = Vector3.new(math.random(-2, 2), 6, 0)
-			billboardGui.Adornee = rootPart
-			billboardGui.Parent = rootPart
-
-			local label = Instance.new("TextLabel")
-			label.Size = UDim2.fromScale(1, 1)
-			label.BackgroundTransparency = 1
-			label.Text = `-{damage}`
-			label.TextColor3 = Color3.fromRGB(255, 50, 50)
-			label.TextStrokeTransparency = 0
-			label.Font = Enum.Font.GothamBold
-			label.TextScaled = true
-			label.Parent = billboardGui
-
-			task.spawn(function()
-				for i = 1, 20 do
-					task.wait(0.05)
-					billboardGui.StudsOffset += Vector3.new(0, 0.2, 0)
-					label.TextTransparency = i / 20
-					label.TextStrokeTransparency = i / 20
-				end
-				billboardGui:Destroy()
-			end)
+			showFloatingDamage(rootPart, damage)
 		end
 	end
+end)
+
+-- H1+H3 fix: damage dealt to an NPC. Server fires this to the SHOOTER ONLY
+-- (so others' combat doesn't spam our hit sound). We render a floating "-X"
+-- above the NPC's root part.
+damageNPCRemote.OnClientEvent:Connect(function(npcModel: Model, damage: number)
+	if not npcModel or not npcModel.PrimaryPart then return end
+	SoundManager.play("Hit")
+	showFloatingDamage(npcModel.PrimaryPart, damage)
+end)
+
+-- H2 fix: render a visible projectile from an attacking NPC to its target.
+-- Fired to all clients so everyone sees the breath, not just the victim.
+npcBreathFiredRemote.OnClientEvent:Connect(function(npcModel: Model, targetPos: Vector3, color: Color3)
+	if not npcModel or not npcModel.PrimaryPart then return end
+	local origin = npcModel.PrimaryPart.Position
+	local direction = (targetPos - origin)
+	if direction.Magnitude < 0.1 then return end
+	direction = direction.Unit
+
+	-- Projectile: same general look as player breath but tinted to the NPC color
+	local projectile = Instance.new("Part")
+	projectile.Name = "NPCBreath"
+	projectile.Size = Vector3.new(2, 2, 4)
+	projectile.Shape = Enum.PartType.Ball
+	projectile.Color = color
+	projectile.Material = Enum.Material.Neon
+	projectile.Anchored = true
+	projectile.CanCollide = false
+	projectile.CFrame = CFrame.lookAt(origin, origin + direction)
+	projectile.Parent = workspace
+
+	local attachment = Instance.new("Attachment")
+	attachment.Parent = projectile
+	local attachment2 = Instance.new("Attachment")
+	attachment2.Position = Vector3.new(0, 0, 1)
+	attachment2.Parent = projectile
+	local trail = Instance.new("Trail")
+	trail.Color = ColorSequence.new(color)
+	trail.Lifetime = 0.3
+	trail.MinLength = 0.1
+	trail.LightEmission = 1
+	trail.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
+	trail.Attachment0 = attachment
+	trail.Attachment1 = attachment2
+	trail.Parent = projectile
+
+	local distance = (targetPos - origin).Magnitude
+	local speed = 150
+	local duration = math.min(distance / speed, 1.0) -- cap so very long shots don't linger
+	local endPos = origin + direction * distance
+
+	local TweenService = game:GetService("TweenService")
+	local tween = TweenService:Create(projectile, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
+		CFrame = CFrame.lookAt(endPos, endPos + direction),
+	})
+	tween:Play()
+	tween.Completed:Connect(function()
+		projectile:Destroy()
+	end)
 end)
 
 -- Player KO. Server fires this for player-vs-player AND for NPC kills:

@@ -19,6 +19,11 @@ return {
 	UpdateScoreboard = "UpdateScoreboard",
 	SyncTimer = "SyncTimer",
 	SpecialEffect = "SpecialEffect",
+	-- NPC-specific events. Kept separate from DamagePlayer/PlayerKO so the
+	-- client can render damage numbers + breath projectiles on NPC models
+	-- without needing a Player object lookup.
+	DamageNPC = "DamageNPC", -- Server → shooter only: hit feedback (floating number + sound)
+	NPCBreathFired = "NPCBreathFired", -- Server → all: render projectile from NPC to target
 
 	-- Client → Server (RemoteFunctions)
 	GetPlayerData = "GetPlayerData",

@@ -46,6 +46,8 @@ local spawnDragonRemote = getRemote("SpawnDragon")
 local updateScoreboardRemote = getRemote("UpdateScoreboard")
 local syncTimerRemote = getRemote("SyncTimer")
 local specialEffectRemote = getRemote("SpecialEffect")
+local damageNPCRemote = getRemote("DamageNPC")
+local npcBreathFiredRemote = getRemote("NPCBreathFired")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 
 -- ================================
@@ -170,7 +172,10 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	if hitNpc then
 		-- applyDamage handles coin reward via the kill callback registered below
 		NPCManager.applyDamage(hitNpc.id, dragon.damage, player.UserId)
-		damagePlayerRemote:FireAllClients(0, dragon.damage) -- 0 userId = NPC hit indicator
+		-- H1+H3 fix: send NPC model + damage to the SHOOTER ONLY. Client renders
+		-- the floating "-15" above the NPC and plays the hit sound. Other clients
+		-- don't get spammed with hit sounds for someone else's combat.
+		damageNPCRemote:FireClient(player, hitNpc.model, dragon.damage)
 	end
 end)
 
@@ -381,8 +386,17 @@ end)
 -- AI damage callback: when an NPC's AI tick decides to fire breath at a player,
 -- the damage flows through CombatManager so all the existing Humanoid sync,
 -- KO handling, respawn timing, and stats updates apply consistently.
-local function npcDamagePlayer(target: Player, damage: number, source: Vector3)
+-- Extra args (npcModel, color) wire the H2 fix: clients render a visible
+-- projectile from the NPC to the target instead of invisible-damage attacks.
+local function npcDamagePlayer(target: Player, damage: number, source: Vector3, npcModel: Model?, color: Color3?)
 	if not RoundManager.isActive() then return end
+
+	-- H2: broadcast breath visual to ALL clients so everyone sees the attack
+	-- (not just the victim). Color comes from the NPC's element so visuals match.
+	if npcModel and color and target.Character and target.Character.PrimaryPart then
+		npcBreathFiredRemote:FireAllClients(npcModel, target.Character.PrimaryPart.Position, color)
+	end
+
 	local killed, actualDamage = CombatManager.applyDamage(target, damage)
 	damagePlayerRemote:FireAllClients(target.UserId, actualDamage)
 
@@ -404,7 +418,10 @@ local function npcDamagePlayer(target: Player, damage: number, source: Vector3)
 	end
 end
 
-NPCManager.startAILoop(npcDamagePlayer)
+-- H4 fix: pass isRoundActive into both AI and wave loops so they don't run
+-- during intermission (no wasted ticks, no spectral breath visuals during the
+-- 15s dragon-select window).
+NPCManager.startAILoop(npcDamagePlayer, RoundManager.isActive)
 NPCManager.startWaveLoop(RoundManager.isActive)
 
 print("[Server] Dragon Warz server ready! (with NPC survival system)")

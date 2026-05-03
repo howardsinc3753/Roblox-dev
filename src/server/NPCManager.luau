@@ -424,6 +424,12 @@ function NPCManager.applyDamage(npcId: number, damage: number, killerUserId: num
 			end
 		end
 
+		-- M1 fix: stop the corpse from drifting + disable the trail so it
+		-- doesn't keep streaming particles for the 500ms death-visible delay.
+		state.linearVelocity.VectorVelocity = Vector3.zero
+		local trail = state.rootPart:FindFirstChildOfClass("Trail")
+		if trail then trail.Enabled = false end
+
 		-- Destroy after short delay so the death is visible
 		task.delay(0.5, function()
 			NPCManager.despawn(state.id)
@@ -456,7 +462,9 @@ local function findNearestPlayer(pos: Vector3, range: number): Player?
 end
 
 -- AI tick: runs every AI_TICK_RATE seconds, updates all NPCs.
-local function tickAI(damageCallback: (target: Player, damage: number, source: Vector3) -> ())
+-- Damage callback signature: (target, damage, source, npcModel, color) — the
+-- last two are for the H2 fix (broadcast breath visual on the client).
+local function tickAI(damageCallback: (target: Player, damage: number, source: Vector3, npcModel: Model?, color: Color3?) -> ())
 	local now = tick()
 
 	for id, state in npcs do
@@ -510,14 +518,15 @@ local function tickAI(damageCallback: (target: Player, damage: number, source: V
 				end
 				state.linearVelocity.VectorVelocity = moveDir * moveSpeed
 
-				-- Face the target
-				state.alignOrientation.CFrame = CFrame.new(pos, targetPos)
+				-- Face the target (CFrame.lookAt is the modern, non-deprecated form)
+				state.alignOrientation.CFrame = CFrame.lookAt(pos, targetPos)
 
-				-- ATTACK: fire breath if in range and cooldown elapsed
+				-- ATTACK: fire breath if in range and cooldown elapsed.
+				-- H2: pass NPC model + color so the damage callback can broadcast
+				-- a visible projectile to all clients.
 				if dist < enemy.attackRange and (now - state.lastBreathTime) >= enemy.attackCooldown then
 					state.lastBreathTime = now
-					-- Damage the player via CombatManager (passed in as callback)
-					damageCallback(currentTarget, enemy.damage, pos)
+					damageCallback(currentTarget, enemy.damage, pos, state.model, enemy.color)
 				end
 			end
 		else
@@ -529,7 +538,7 @@ local function tickAI(damageCallback: (target: Player, damage: number, source: V
 			local toWander = state.wanderTarget - pos
 			if toWander.Magnitude > 5 then
 				state.linearVelocity.VectorVelocity = toWander.Unit * (enemy.speed * 0.5)
-				state.alignOrientation.CFrame = CFrame.new(pos, state.wanderTarget)
+				state.alignOrientation.CFrame = CFrame.lookAt(pos, state.wanderTarget)
 			else
 				state.linearVelocity.VectorVelocity = Vector3.zero
 			end
@@ -537,14 +546,24 @@ local function tickAI(damageCallback: (target: Player, damage: number, source: V
 	end
 end
 
--- Public: start AI tick loop. Call once on server startup. The damage
--- callback is what the AI uses to attack players (separates AI from
--- CombatManager so this module doesn't need to know combat internals).
-function NPCManager.startAILoop(damageCallback: (target: Player, damage: number, source: Vector3) -> ())
+-- Public: start AI tick loop. Call once on server startup.
+-- H4: optional isRoundActive gate so the AI doesn't burn cycles or fire
+-- spectral breath visuals during the 15s intermission.
+-- M6: pcall errors now logged instead of silently dropped.
+function NPCManager.startAILoop(
+	damageCallback: (target: Player, damage: number, source: Vector3, npcModel: Model?, color: Color3?) -> (),
+	isRoundActive: (() -> boolean)?
+)
 	task.spawn(function()
 		while true do
 			task.wait(AI_TICK_RATE)
-			pcall(tickAI, damageCallback)
+			if isRoundActive and not isRoundActive() then
+				continue
+			end
+			local ok, err = pcall(tickAI, damageCallback)
+			if not ok then
+				warn(`[NPCManager] AI tick error: {err}`)
+			end
 		end
 	end)
 end
@@ -565,17 +584,20 @@ function NPCManager.startWaveLoop(isRoundActive: () -> boolean)
 				local wave = WAVES[math.min(waveNum, #WAVES)]
 				print(`[NPCManager] Spawning wave {waveNum}: {wave.scouts}S {wave.warriors}W {wave.bosses}B`)
 
-				-- Spawn each enemy in the wave with a small stagger so they don't
-				-- all materialize at the exact same spot on the same frame
+				-- M2 fix: each spawn loop checks isRoundActive so a mid-wave
+				-- round-end doesn't burn InsertService calls + immediate cleanup.
 				for i = 1, wave.scouts do
+					if not isRoundActive() then break end
 					NPCManager.spawn("Scout")
 					task.wait(0.3)
 				end
 				for i = 1, wave.warriors do
+					if not isRoundActive() then break end
 					NPCManager.spawn("Warrior")
 					task.wait(0.5)
 				end
 				for i = 1, wave.bosses do
+					if not isRoundActive() then break end
 					NPCManager.spawn("Boss")
 					task.wait(0.8)
 				end

@@ -25,6 +25,8 @@ local function setup()
 		RemoteNames.UpdateScoreboard,
 		RemoteNames.SyncTimer,
 		RemoteNames.SpecialEffect,
+		RemoteNames.DamageNPC,
+		RemoteNames.NPCBreathFired,
 	}
 
 	for _, name in eventNames do
