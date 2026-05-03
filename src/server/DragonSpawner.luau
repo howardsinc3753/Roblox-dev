@@ -307,6 +307,49 @@ local function attachMeshVisual(dragonModel: Model, meshAssetId: number, dragonI
 	end
 end
 
+-- Add a colored Trail effect that streams behind the dragon as it flies.
+-- The trail uses the dragon's element color so each dragon has a distinct
+-- visual signature in the air. Replicates from server so all clients see
+-- every dragon's trail (not just their own).
+local function attachTrailEffect(dragonModel: Model, dragon: any)
+	local body = dragonModel:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not body then return end
+
+	-- Two attachments: one in front, one behind. The trail draws between them.
+	local frontAttach = Instance.new("Attachment")
+	frontAttach.Name = "TrailFront"
+	frontAttach.Position = Vector3.new(0, 0, 2)
+	frontAttach.Parent = body
+
+	local backAttach = Instance.new("Attachment")
+	backAttach.Name = "TrailBack"
+	backAttach.Position = Vector3.new(0, 0, -2)
+	backAttach.Parent = body
+
+	local trail = Instance.new("Trail")
+	trail.Name = "FlightTrail"
+	trail.Attachment0 = frontAttach
+	trail.Attachment1 = backAttach
+	trail.Lifetime = 1.2
+	trail.MinLength = 0.05
+	trail.LightEmission = 0.6
+	trail.LightInfluence = 0
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 0),
+	})
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.3),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, dragon.color),
+		ColorSequenceKeypoint.new(0.5, dragon.secondaryColor),
+		ColorSequenceKeypoint.new(1, dragon.color),
+	})
+	trail.Parent = body
+end
+
 function DragonSpawner.spawn(player: Player, dragonId: string): Model
 	-- Remove old character if any
 	if player.Character then
@@ -322,6 +365,11 @@ function DragonSpawner.spawn(player: Player, dragonId: string): Model
 	local dragonCfg = DragonConfig[dragonId]
 	if dragonCfg and dragonCfg.meshAssetId then
 		attachMeshVisual(model, dragonCfg.meshAssetId, dragonId, dragonCfg.meshScale or 1)
+	end
+
+	-- Trail effect for in-air visual flair (works for both placeholder and Meshy dragons)
+	if dragonCfg then
+		attachTrailEffect(model, dragonCfg)
 	end
 
 	-- Constraints created BEFORE player.Character = model. Otherwise the client

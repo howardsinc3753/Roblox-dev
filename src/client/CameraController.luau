@@ -17,8 +17,12 @@ local player = Players.LocalPlayer
 local camera = game.Workspace.CurrentCamera
 
 -- Zoom: lerps between near and far CAMERA_OFFSET based on mouse wheel.
-local CAMERA_OFFSET_NEAR = Vector3.new(0, 4, 8) -- close third-person
+-- At zoomLevel < FIRST_PERSON_THRESHOLD, switches to first-person (camera
+-- inside dragon's head, local mesh hidden).
+local FIRST_PERSON_OFFSET = Vector3.new(0, 1, -3) -- inside dragon's head, looking forward
+local CAMERA_OFFSET_NEAR = Vector3.new(0, 4, 8) -- close third-person (zoomLevel just past first-person)
 local CAMERA_OFFSET_FAR = Vector3.new(0, 18, 32) -- aerial-combat default
+local FIRST_PERSON_THRESHOLD = 0.05 -- below this, snap to first-person
 local CAMERA_SENSITIVITY = 0.3
 local CAMERA_SMOOTH_RATE = 12 -- per second; ~0.2 alpha at 60fps, frame-rate independent
 local ZOOM_SENSITIVITY = 0.1
@@ -32,6 +36,23 @@ local yaw = 0
 local pitch = -25 -- angled down so you see enemies below and ahead
 local zoomLevel = 1.0 -- 0 = nearest, 1 = furthest
 local enabled = false
+local wasFirstPerson = false -- tracks state to avoid setting transparency every frame
+
+-- Hide/show the local player's dragon mesh. Used for first-person mode so
+-- the player sees through the dragon's eyes without their own model blocking.
+-- LocalTransparencyModifier only affects the local view, so other clients
+-- still see this player's dragon normally.
+local function setLocalMeshVisible(character: Model?, visible: boolean)
+	if not character then return end
+	local modifier = if visible then 0 else 1
+	for _, descendant in character:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			(descendant :: BasePart).LocalTransparencyModifier = modifier
+		elseif descendant:IsA("BillboardGui") then
+			(descendant :: BillboardGui).Enabled = visible
+		end
+	end
+end
 
 function CameraController.enable()
 	enabled = true
@@ -45,6 +66,9 @@ function CameraController.disable()
 	camera.CameraType = Enum.CameraType.Custom
 	camera.FieldOfView = FOV_DEFAULT
 	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	-- Restore mesh visibility so a respawn or spectator view shows the dragon
+	setLocalMeshVisible(player.Character, true)
+	wasFirstPerson = false
 end
 
 -- Mouse movement = look. Mouse wheel = zoom.
@@ -70,9 +94,22 @@ RunService.RenderStepped:Connect(function(dt: number)
 	if not rootPart then return end
 
 	local dragonPos = rootPart.Position
+	local isFirstPerson = zoomLevel < FIRST_PERSON_THRESHOLD
+
+	-- Toggle local mesh visibility on first-person state changes only (not
+	-- every frame; setting LocalTransparencyModifier is cheap but pointless
+	-- to do redundantly).
+	if isFirstPerson ~= wasFirstPerson then
+		setLocalMeshVisible(character, not isFirstPerson)
+		wasFirstPerson = isFirstPerson
+	end
 
 	-- Compute camera position from yaw/pitch + zoomLevel-driven offset.
-	local currentOffset = CAMERA_OFFSET_NEAR:Lerp(CAMERA_OFFSET_FAR, zoomLevel)
+	-- First-person uses fixed FIRST_PERSON_OFFSET so the camera sits in the
+	-- dragon's head consistently regardless of zoomLevel rounding.
+	local currentOffset = if isFirstPerson
+		then FIRST_PERSON_OFFSET
+		else CAMERA_OFFSET_NEAR:Lerp(CAMERA_OFFSET_FAR, zoomLevel)
 	local rotation = CFrame.Angles(0, math.rad(yaw), 0) * CFrame.Angles(math.rad(pitch), 0, 0)
 	local offset = rotation:VectorToWorldSpace(currentOffset)
 	local cameraPos = dragonPos + offset

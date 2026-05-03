@@ -48,6 +48,38 @@ function SoundManager.play(name: string)
 	end
 end
 
+-- Background music: looped, plays continuously while client is alive.
+-- Roblox audio library: 1837854434 is "Epic Battle" type loop. Tweak as desired.
+local BACKGROUND_MUSIC_ID = "rbxassetid://1837854434"
+local BACKGROUND_MUSIC_VOLUME = 0.25
+
+local backgroundMusic: Sound? = nil
+
+function SoundManager.startMusic()
+	if backgroundMusic then return end
+	backgroundMusic = Instance.new("Sound")
+	backgroundMusic.Name = "BackgroundMusic"
+	backgroundMusic.SoundId = BACKGROUND_MUSIC_ID
+	backgroundMusic.Volume = BACKGROUND_MUSIC_VOLUME
+	backgroundMusic.Looped = true
+	backgroundMusic.Parent = SoundService
+	backgroundMusic:Play()
+end
+
+function SoundManager.stopMusic()
+	if backgroundMusic then
+		backgroundMusic:Stop()
+		backgroundMusic:Destroy()
+		backgroundMusic = nil
+	end
+end
+
+function SoundManager.setMusicVolume(volume: number)
+	if backgroundMusic then
+		backgroundMusic.Volume = math.clamp(volume, 0, 1)
+	end
+end
+
 function SoundManager.playAtPosition(name: string, position: Vector3)
 	local config = SOUNDS[name]
 	if not config then return end

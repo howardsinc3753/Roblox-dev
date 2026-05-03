@@ -29,6 +29,7 @@ print(`[Client] {player.Name} Dragon Warz client starting...`)
 CombatInput.init()
 HUD.create()
 SoundManager.init()
+SoundManager.startMusic()
 
 -- Current state
 local currentDragonId = "Ember"
