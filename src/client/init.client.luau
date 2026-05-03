@@ -30,6 +30,7 @@ local Awareness = require(script.Awareness)
 local WelcomeBanner = require(script.WelcomeBanner)
 local MobileControls = require(script.MobileControls)
 local ControlsOverlay = require(script.ControlsOverlay)
+local TipManager = require(script.TipManager)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -116,11 +117,16 @@ spawnDragonRemote.OnClientEvent:Connect(function(dragonId: string)
 		FlightController.enable()
 		CameraController.enable()
 		CombatInput.enable()
-		-- FTUE: shows the big controls card on first spawn so kids actually
-		-- learn what every button does (especially on Xbox where the tiny
-		-- bottom-of-screen hint is unreadable from a couch). Self-throttles
-		-- to once per session via internal flag.
-		ControlsOverlay.show()
+		-- FTUE: progressive tutorial pills (one prompt at a time, dismissed
+		-- by doing the action). Replaces the all-at-once ControlsOverlay
+		-- which kid playtest showed was overwhelming + instantly forgotten.
+		-- Self-throttles to once per session.
+		TipManager.startSequence()
+		-- Big controls card is still available — for now we don't auto-show
+		-- it. Future: bind to a "Help" button in the dragon-select menu so
+		-- curious kids can pull up the full reference.
+		-- ControlsOverlay.show() — disabled per playtest feedback
+		_ = ControlsOverlay -- silence unused-import warning until we wire the menu help button
 	end)
 end)
 
