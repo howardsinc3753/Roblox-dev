@@ -24,6 +24,7 @@ local HUD = require(script.HUD)
 local SoundManager = require(script.SoundManager)
 local DragonSelectUI = require(script.DragonSelectUI)
 local RoundEndSummary = require(script.RoundEndSummary)
+local Awareness = require(script.Awareness)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -35,6 +36,7 @@ SoundManager.startMusic()
 DragonSelectUI.init()
 DragonSelectUI.create()
 RoundEndSummary.create()
+Awareness.create()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
@@ -126,8 +128,9 @@ local function showFloatingDamage(adornee: BasePart, damage: number)
 	end)
 end
 
--- Damage dealt to a player (PvP)
-damagePlayerRemote.OnClientEvent:Connect(function(targetUserId: number, damage: number)
+-- Damage dealt to a player (PvP or NPC→player). Server now passes a 3rd arg
+-- `sourcePosition` so the victim's client can render a damage-direction arc.
+damagePlayerRemote.OnClientEvent:Connect(function(targetUserId: number, damage: number, sourcePosition: Vector3?)
 	SoundManager.play("Hit")
 
 	local targetPlayer = Players:GetPlayerByUserId(targetUserId)
@@ -136,6 +139,12 @@ damagePlayerRemote.OnClientEvent:Connect(function(targetUserId: number, damage: 
 		if rootPart then
 			showFloatingDamage(rootPart, damage)
 		end
+	end
+
+	-- Damage-direction indicator: only show for the LOCAL player taking damage
+	-- (showing arrows for someone else's damage would just be screen clutter).
+	if targetUserId == player.UserId and sourcePosition then
+		Awareness.showDamageFrom(sourcePosition)
 	end
 end)
 
@@ -435,6 +444,11 @@ RunService.Heartbeat:Connect(function(dt: number)
 		roundTimeRemaining = math.max(0, roundTimeRemaining - dt)
 		HUD.updateRoundTimer(`Time: {math.floor(roundTimeRemaining)}s`)
 	end
+
+	-- Compass: project off-screen players + NPCs to the screen edge as arrows
+	-- so the player always knows where to look for action. Cheap (~10 entities
+	-- max, simple math) so safe to run every frame.
+	Awareness.updateCompass()
 end)
 
 print(`[Client] {player.Name} Dragon Warz client ready!`)
