@@ -16,13 +16,17 @@ local RoundManager = require(script.RoundManager)
 local DragonSpawner = require(script.DragonSpawner)
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 local ArenaBuilder = require(script.ArenaBuilder)
+local LairBuilder = require(script.LairBuilder)
 local NPCManager = require(script.NPCManager)
 local RateLimiter = require(script.RateLimiter)
 
 print("[Server] Dragon Warz server starting...")
 
--- Build the arena first
+-- Build the arena (combat zone) and lair (safe hub). Both static — built
+-- once at server start. Sprint 5 Part E adds the portal Touched handlers
+-- that teleport players between them.
 ArenaBuilder.build()
+LairBuilder.build()
 
 -- Helper to get a remote
 local function getRemote(name: string): RemoteEvent
@@ -51,6 +55,8 @@ local damageNPCRemote = getRemote("DamageNPC")
 local npcBreathFiredRemote = getRemote("NPCBreathFired")
 local lockOnTargetRemote = getRemote("LockOnTarget")
 local lockedByEnemyRemote = getRemote("LockedByEnemy")
+local useShieldRemote = getRemote("UseShield")
+local shieldActivatedRemote = getRemote("ShieldActivated")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 
 -- ================================
@@ -58,6 +64,48 @@ local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 -- ================================
 
 local RESPAWN_TIME = 5
+
+-- Build the standard Roblox top-right leaderboard entries for a player.
+-- Roblox auto-renders any IntValue/StringValue inside a folder named exactly
+-- "leaderstats" under the player. This gives kids the always-visible kill +
+-- coin counter they expect from every other Roblox game, no custom UI needed.
+local function setupLeaderstats(player: Player, initialCoins: number)
+	local leaderstats = Instance.new("Folder")
+	leaderstats.Name = "leaderstats"
+	leaderstats.Parent = player
+
+	local kills = Instance.new("IntValue")
+	kills.Name = "Kills"
+	kills.Value = 0
+	kills.Parent = leaderstats
+
+	local coins = Instance.new("IntValue")
+	coins.Name = "Coins"
+	coins.Value = initialCoins
+	coins.Parent = leaderstats
+end
+
+-- Keep the leaderboard in sync with round score + coin balance. Called from
+-- every place that touches kills/coins. Defensive: silent no-op if the
+-- player's leaderstats folder isn't there (very early in join, etc.).
+local function refreshLeaderstats(player: Player)
+	local leaderstats = player:FindFirstChild("leaderstats")
+	if not leaderstats then return end
+	local killsValue = leaderstats:FindFirstChild("Kills") :: IntValue?
+	local coinsValue = leaderstats:FindFirstChild("Coins") :: IntValue?
+	if killsValue then
+		local board = RoundManager.getScoreboard()
+		for _, entry in board do
+			if entry.userId == player.UserId then
+				killsValue.Value = entry.kills
+				break
+			end
+		end
+	end
+	if coinsValue then
+		coinsValue.Value = DataManager.getCoins(player)
+	end
+end
 
 Players.PlayerAdded:Connect(function(player: Player)
 	print(`[Server] {player.Name} joined`)
@@ -70,6 +118,10 @@ Players.PlayerAdded:Connect(function(player: Player)
 	-- client via the existing GetPlayerData refresh — no new remote needed.
 	DataManager.processLogin(player)
 	RoundManager.initPlayerScore(player)
+
+	-- Standard leaderboard. Kept in sync with round score + coin balance via
+	-- the addCoins / recordKill / recordNPCKill paths below.
+	setupLeaderstats(player, data.coins)
 
 	-- Spawn their dragon
 	local dragonId = data.selectedDragon
@@ -223,7 +275,9 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 			if killed then
 				RoundManager.recordKill(player, hitPlayer)
 				DataManager.addCoins(player, 10)
+				RoundManager.recordCoins(player, 10) -- count toward end-of-round summary
 				updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+				refreshLeaderstats(player)
 
 				local data = DataManager.getData(player)
 				if data then data.stats.totalKills += 1 end
@@ -315,7 +369,9 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 			if killed then
 				RoundManager.recordKill(player, target)
 				DataManager.addCoins(player, 10)
+				RoundManager.recordCoins(player, 10) -- count toward end-of-round summary
 				updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+				refreshLeaderstats(player)
 				playerKORemote:FireAllClients(player.UserId, target.UserId)
 				task.delay(RESPAWN_TIME, function()
 					if target and target.Parent then
@@ -360,7 +416,9 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 			if killed then
 				RoundManager.recordKill(player, target)
 				DataManager.addCoins(player, 10)
+				RoundManager.recordCoins(player, 10) -- count toward end-of-round summary
 				updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+				refreshLeaderstats(player)
 				playerKORemote:FireAllClients(player.UserId, target.UserId)
 				task.delay(RESPAWN_TIME, function()
 					if target and target.Parent then
@@ -423,6 +481,21 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 	end
 end)
 
+-- Defensive shield. 12s cooldown, 4s active duration, 80% damage reduction
+-- while up. Rate-limited to 2/sec defensively (real cooldown is 12s but the
+-- remote spam-guard is cheap insurance). Broadcasts to all clients so
+-- everyone sees the shield bubble around the user's dragon.
+useShieldRemote.OnServerEvent:Connect(function(player: Player)
+	if not RateLimiter.check(player, "UseShield", 2) then return end
+	if not CombatManager.canUseShield(player) then return end
+	if not RoundManager.isActive() then return end
+
+	local ok = CombatManager.useShield(player)
+	if not ok then return end
+	-- Tell everyone the bubble is up so the visual renders for spectators too
+	shieldActivatedRemote:FireAllClients(player.UserId)
+end)
+
 -- Get player data (RemoteFunction)
 getPlayerDataFunc.OnServerInvoke = function(player: Player)
 	return DataManager.getData(player)
@@ -467,7 +540,11 @@ RoundManager.setCallbacks(
 		local firstWinClaimed: { [number]: boolean } = {}
 
 		for _, player in Players:GetPlayers() do
-			local earned = PARTICIPATION
+			-- Start with everything the kid earned during the round (kill
+			-- rewards, NPC kill rewards). Without this, the summary used to
+			-- show "0 coins earned" when the kid spent the whole round
+			-- killing NPCs because only post-round bonuses were counted.
+			local earned = RoundManager.getRoundCoins(player) + PARTICIPATION
 			if winner and winner.UserId == player.UserId then
 				earned += WIN_BONUS
 				-- Stack the first-win-of-day bonus on top of the regular win bonus.
@@ -479,9 +556,15 @@ RoundManager.setCallbacks(
 					firstWinClaimed[player.UserId] = true
 				end
 			end
-			DataManager.addCoins(player, earned)
+			-- addCoins only adds the post-round bonuses (participation + win +
+			-- first-win) — the in-round earnings were already added live as the
+			-- kid scored kills. So we add (earned - roundCoins) here, but the
+			-- DISPLAYED `earned` is the full total including in-round.
+			local postRoundBonus = earned - RoundManager.getRoundCoins(player)
+			DataManager.addCoins(player, postRoundBonus)
 			coinsEarnedThisRound[player.UserId] = earned
 			updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+			refreshLeaderstats(player)
 		end
 
 		roundEndRemote:FireAllClients(
@@ -525,10 +608,21 @@ NPCManager.setKillCallback(function(killerUserId: number, enemyType: string, coi
 	if not killer then return end
 
 	DataManager.addCoins(killer, coinReward)
+	-- Track in the round-coin running total so the end-of-round summary
+	-- shows the kid's full earnings (was always showing 0 before because
+	-- only the +5 participation bonus was being counted).
+	RoundManager.recordCoins(killer, coinReward)
 	updateCoinsRemote:FireClient(killer, DataManager.getCoins(killer))
 
 	local data = DataManager.getData(killer)
 	if data then data.stats.totalKills += 1 end
+
+	-- Count NPC kills toward the round scoreboard too. Kids fighting only
+	-- waves were ending rounds with "0 Kills" because PvE wasn't credited
+	-- against the round score; this rolls them into the same counter.
+	RoundManager.recordNPCKill(killer)
+	updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
+	refreshLeaderstats(killer)
 
 	-- Fire KO event so the kill feed shows "[killer] eliminated [Enemy Type]"
 	-- userId 0 indicates NPC; client renders the enemy name from enemyType arg.
