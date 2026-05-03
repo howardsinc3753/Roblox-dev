@@ -792,12 +792,20 @@ function HUD.showDeathOverlay(killerName: string, duration: number)
 		deathOverlayGui = nil
 	end
 
-	deathOverlayGui = Instance.new("ScreenGui")
-	(deathOverlayGui :: ScreenGui).Name = "DeathOverlay"
-	(deathOverlayGui :: ScreenGui).ResetOnSpawn = false
-	(deathOverlayGui :: ScreenGui).IgnoreGuiInset = true
-	(deathOverlayGui :: ScreenGui).DisplayOrder = 14 -- above HUD (5), below RoundEndSummary (12)... wait, above it
-	(deathOverlayGui :: ScreenGui).Parent = playerGui
+	-- Build via a non-nullable local first, then assign to the module-level
+	-- variable. Without this, Luau parses
+	--     deathOverlayGui = Instance.new("ScreenGui")
+	--     (deathOverlayGui :: ScreenGui).Name = ...
+	-- as a single expression `Instance.new("ScreenGui")(deathOverlayGui :: ScreenGui)`
+	-- and throws "ambiguous syntax." A local-then-assign avoids that entirely
+	-- and is also cleaner to read.
+	local overlay = Instance.new("ScreenGui")
+	overlay.Name = "DeathOverlay"
+	overlay.ResetOnSpawn = false
+	overlay.IgnoreGuiInset = true
+	overlay.DisplayOrder = 14 -- above HUD (5) and RoundEndSummary (12)
+	overlay.Parent = playerGui
+	deathOverlayGui = overlay
 
 	-- Full-screen red tint
 	local tint = Instance.new("Frame")
@@ -805,7 +813,7 @@ function HUD.showDeathOverlay(killerName: string, duration: number)
 	tint.BackgroundColor3 = Color3.fromRGB(140, 0, 0)
 	tint.BackgroundTransparency = 0.6
 	tint.BorderSizePixel = 0
-	tint.Parent = deathOverlayGui
+	tint.Parent = overlay
 
 	-- Big "YOU DIED" banner — gold on red reads as "this is bad and important"
 	local banner = Instance.new("TextLabel")
@@ -819,7 +827,7 @@ function HUD.showDeathOverlay(killerName: string, duration: number)
 	banner.TextStrokeTransparency = 0
 	banner.Font = Enum.Font.GothamBlack
 	banner.TextScaled = true
-	banner.Parent = deathOverlayGui
+	banner.Parent = overlay
 
 	-- Killer name — kids want to know "what got me?"
 	local killerLine = Instance.new("TextLabel")
@@ -832,7 +840,7 @@ function HUD.showDeathOverlay(killerName: string, duration: number)
 	killerLine.TextStrokeTransparency = 0
 	killerLine.Font = Enum.Font.GothamBold
 	killerLine.TextScaled = true
-	killerLine.Parent = deathOverlayGui
+	killerLine.Parent = overlay
 
 	-- Respawn countdown that ticks every second so kids see time progressing
 	local countdown = Instance.new("TextLabel")
@@ -846,12 +854,11 @@ function HUD.showDeathOverlay(killerName: string, duration: number)
 	countdown.TextStrokeTransparency = 0
 	countdown.Font = Enum.Font.GothamBold
 	countdown.TextScaled = true
-	countdown.Parent = deathOverlayGui
+	countdown.Parent = overlay
 
 	-- Tick the countdown text every second
-	local generation = (deathOverlayGui :: ScreenGui):GetAttribute("Generation") or 0
-	generation += 1
-	(deathOverlayGui :: ScreenGui):SetAttribute("Generation", generation)
+	local generation = (overlay:GetAttribute("Generation") or 0) + 1
+	overlay:SetAttribute("Generation", generation)
 	task.spawn(function()
 		for remaining = duration - 1, 0, -1 do
 			task.wait(1)
