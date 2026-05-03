@@ -13,6 +13,11 @@ export type DragonStats = {
 	color: Color3,
 	secondaryColor: Color3,
 	cost: number,
+	-- Optional: Roblox asset ID for a Meshy-generated dragon model.
+	-- If set, DragonSpawner uses InsertService:LoadAsset() instead of placeholder parts.
+	meshAssetId: number?,
+	-- Scale to apply to loaded mesh (Meshy meshes often need adjustment to match Roblox studs)
+	meshScale: number?,
 }
 
 local Dragons: { [string]: DragonStats } = {
@@ -27,6 +32,8 @@ local Dragons: { [string]: DragonStats } = {
 		color = Color3.fromRGB(255, 80, 20),
 		secondaryColor = Color3.fromRGB(255, 200, 50),
 		cost = 0,
+		meshAssetId = 107923746686309, -- Meshy-generated Ember dragon
+		meshScale = 4, -- tweak this if dragon appears too small/large
 	},
 	Frost = {
 		name = "Frost",

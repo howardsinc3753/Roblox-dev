@@ -1,11 +1,16 @@
 --!strict
 -- Creates and manages dragon character models for players.
--- Dragons are simple Part-based models (replaced with meshes later).
+-- Uses real Meshy-generated meshes when DragonConfig has a meshAssetId,
+-- otherwise falls back to placeholder Part-based dragons.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local InsertService = game:GetService("InsertService")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+
+-- Cache loaded mesh templates per dragonId (avoid re-downloading every spawn)
+local meshCache: { [string]: Model } = {}
 
 local DragonSpawner = {}
 
@@ -179,6 +184,90 @@ local function buildDragonModel(dragonId: string, player: Player): Model
 	return model
 end
 
+-- Load a Meshy mesh from Roblox asset ID. Returns the loaded mesh as a Model
+-- (cloned from a cached template), or nil on failure.
+local function loadMeshTemplate(dragonId: string, assetId: number): Model?
+	if meshCache[dragonId] then
+		return meshCache[dragonId]:Clone()
+	end
+
+	local ok, result = pcall(function()
+		return InsertService:LoadAsset(assetId)
+	end)
+
+	if not ok or not result then
+		warn(`[DragonSpawner] Failed to load mesh for {dragonId} (assetId={assetId}): {result}`)
+		return nil
+	end
+
+	-- LoadAsset returns a Model wrapper; the actual content is inside
+	local container = result :: Model
+	local meshContent: Model? = nil
+
+	for _, child in container:GetChildren() do
+		if child:IsA("Model") then
+			meshContent = child
+			break
+		end
+	end
+
+	-- Sometimes the mesh is parented directly to the container
+	if not meshContent then
+		meshContent = container
+	end
+
+	meshCache[dragonId] = meshContent :: Model
+	container.Parent = nil
+	return (meshContent :: Model):Clone()
+end
+
+-- Attach the loaded Meshy mesh to a player's dragon model as visual.
+-- Welds all parts of the mesh to the body (HumanoidRootPart equivalent),
+-- removes placeholder visual parts (head, wings, tail), keeps body transparent.
+local function attachMeshVisual(dragonModel: Model, meshAssetId: number, dragonId: string, scale: number)
+	local meshTemplate = loadMeshTemplate(dragonId, meshAssetId)
+	if not meshTemplate then return end
+
+	local body = dragonModel:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not body then return end
+
+	-- Hide the placeholder visual parts (keep body for physics, hide visually)
+	for _, partName in { "HumanoidRootPart", "Head", "WingLeft", "WingRight", "Tail" } do
+		local part = dragonModel:FindFirstChild(partName) :: BasePart?
+		if part then
+			part.Transparency = 1
+			-- Disable the placeholder body's color so weld clipping doesn't show
+		end
+	end
+
+	-- Scale the mesh
+	if meshTemplate:IsA("Model") then
+		meshTemplate:ScaleTo(scale)
+	end
+
+	-- Position the mesh at the body and weld all parts to it
+	local meshCenter: Vector3 = body.Position
+	if meshTemplate:IsA("Model") then
+		meshTemplate:PivotTo(CFrame.new(meshCenter))
+	end
+
+	-- Weld each part of the mesh to the body
+	for _, descendant in meshTemplate:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = false
+			descendant.CanCollide = false
+			descendant.Massless = true
+			local weld = Instance.new("WeldConstraint")
+			weld.Part0 = body
+			weld.Part1 = descendant
+			weld.Parent = descendant
+		end
+	end
+
+	meshTemplate.Name = "MeshyVisual"
+	meshTemplate.Parent = dragonModel
+end
+
 function DragonSpawner.spawn(player: Player, dragonId: string): Model
 	-- Remove old character if any
 	if player.Character then
@@ -189,6 +278,12 @@ function DragonSpawner.spawn(player: Player, dragonId: string): Model
 	local spawnPos = getRandomSpawnPoint()
 	model:PivotTo(CFrame.new(spawnPos))
 	model.Parent = game.Workspace
+
+	-- If this dragon has a real Meshy mesh, attach it as visual layer
+	local dragonCfg = DragonConfig[dragonId]
+	if dragonCfg and dragonCfg.meshAssetId then
+		attachMeshVisual(model, dragonCfg.meshAssetId, dragonId, dragonCfg.meshScale or 1)
+	end
 
 	player.Character = model
 
