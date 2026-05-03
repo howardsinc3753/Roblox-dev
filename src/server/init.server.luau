@@ -19,8 +19,31 @@ local ArenaBuilder = require(script.ArenaBuilder)
 local NPCManager = require(script.NPCManager)
 local RateLimiter = require(script.RateLimiter)
 local LairBuilder = require(script.LairBuilder)
+local CollectionService = game:GetService("CollectionService")
 
 print("[Server] Dragon Warz server starting...")
+
+-- Sprint 5 Part F: all spawns default to the Lair (safe zone). The Arena
+-- is reached via portal teleport (Part E), not direct spawn. Replaces all
+-- previous spawnInLair(p, d) calls. The arenaSpawn helper below is
+-- used by the Lair portal Touched handler to send players into combat.
+local function spawnInLair(player: Player, dragonId: string)
+	return spawnInLair(player, dragonId, LairBuilder.getRandomSpawnPoint())
+end
+
+local function teleportToArena(player: Player)
+	local character = player.Character
+	if not character or not character.PrimaryPart then return end
+	local arenaPos = DragonSpawner.getRandomSpawnPoint()
+	character:PivotTo(CFrame.new(arenaPos))
+end
+
+local function teleportToLair(player: Player)
+	local character = player.Character
+	if not character or not character.PrimaryPart then return end
+	local lairPos = LairBuilder.getRandomSpawnPoint()
+	character:PivotTo(CFrame.new(lairPos))
+end
 
 -- Build the arena (combat zone) and lair (safe hub) at server start.
 -- Both static, so no per-player cost. Sprint 5 Part C adds zone detection
@@ -127,7 +150,7 @@ Players.PlayerAdded:Connect(function(player: Player)
 	-- Spawn their dragon
 	local dragonId = data.selectedDragon
 	CombatManager.initPlayer(player, dragonId)
-	DragonSpawner.spawn(player, dragonId)
+	spawnInLair(player, dragonId)
 
 	-- Send initial data to client (coins now include the daily bonus)
 	updateCoinsRemote:FireClient(player, data.coins)
@@ -159,7 +182,7 @@ selectDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 
 	data.selectedDragon = id
 	CombatManager.initPlayer(player, id)
-	DragonSpawner.spawn(player, id)
+	spawnInLair(player, id)
 	spawnDragonRemote:FireClient(player, id)
 end)
 
@@ -293,7 +316,7 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 						local vData = DataManager.getData(hitPlayer)
 						local vDragonId = if vData then vData.selectedDragon else "Ember"
 						CombatManager.respawn(hitPlayer)
-						DragonSpawner.spawn(hitPlayer, vDragonId)
+						spawnInLair(hitPlayer, vDragonId)
 					end
 				end)
 			end
@@ -378,7 +401,7 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 					if target and target.Parent then
 						CombatManager.respawn(target)
 						local tData = DataManager.getData(target)
-						DragonSpawner.spawn(target, if tData then tData.selectedDragon else "Ember")
+						spawnInLair(target, if tData then tData.selectedDragon else "Ember")
 					end
 				end)
 			end
@@ -425,7 +448,7 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 					if target and target.Parent then
 						CombatManager.respawn(target)
 						local tData = DataManager.getData(target)
-						DragonSpawner.spawn(target, if tData then tData.selectedDragon else "Ember")
+						spawnInLair(target, if tData then tData.selectedDragon else "Ember")
 					end
 				end)
 			end
@@ -517,7 +540,7 @@ RoundManager.setCallbacks(
 			local data = DataManager.getData(player)
 			local dragonId = if data then data.selectedDragon else "Ember"
 			CombatManager.initPlayer(player, dragonId)
-			DragonSpawner.spawn(player, dragonId)
+			spawnInLair(player, dragonId)
 
 			if data then
 				data.stats.gamesPlayed += 1
@@ -661,7 +684,7 @@ local function npcDamagePlayer(target: Player, damage: number, source: Vector3, 
 				local vData = DataManager.getData(target)
 				local vDragonId = if vData then vData.selectedDragon else "Ember"
 				CombatManager.respawn(target)
-				DragonSpawner.spawn(target, vDragonId)
+				spawnInLair(target, vDragonId)
 			end
 		end)
 	end
@@ -694,4 +717,43 @@ end)
 NPCManager.startAILoop(npcDamagePlayer, RoundManager.isActive)
 NPCManager.startWaveLoop(RoundManager.isActive)
 
-print("[Server] Dragon Warz server ready! (with NPC survival system)")
+-- ================================
+-- Sprint 5 Part E: PORTAL TELEPORTS
+-- ================================
+-- Lair portal (tag "DragonWarz_Portal_ToArena") teleports the toucher
+-- to a random Arena spawn point. Per-player cooldown via attribute
+-- prevents the touch-loop bounce-back when the player overlaps the
+-- portal post-teleport.
+local PORTAL_COOLDOWN = 2 -- seconds between teleports per player
+
+local function bindPortal(portal: BasePart, teleportFn: (Player) -> ())
+	portal.Touched:Connect(function(otherPart: BasePart)
+		local character = otherPart:FindFirstAncestorOfClass("Model")
+		if not character then return end
+		local player = Players:GetPlayerFromCharacter(character)
+		if not player then return end
+		-- Per-player cooldown to prevent infinite bounce
+		local key = `LastTeleport_{player.UserId}`
+		local last = portal:GetAttribute(key) or 0
+		if tick() - last < PORTAL_COOLDOWN then return end
+		portal:SetAttribute(key, tick())
+		teleportFn(player)
+	end)
+end
+
+-- Wire all existing tagged portals + future ones (in case of respawn/rebuild)
+for _, portal in CollectionService:GetTagged("DragonWarz_Portal_ToArena") do
+	bindPortal(portal :: BasePart, teleportToArena)
+end
+CollectionService:GetInstanceAddedSignal("DragonWarz_Portal_ToArena"):Connect(function(portal)
+	bindPortal(portal :: BasePart, teleportToArena)
+end)
+
+for _, portal in CollectionService:GetTagged("DragonWarz_Portal_ToLair") do
+	bindPortal(portal :: BasePart, teleportToLair)
+end
+CollectionService:GetInstanceAddedSignal("DragonWarz_Portal_ToLair"):Connect(function(portal)
+	bindPortal(portal :: BasePart, teleportToLair)
+end)
+
+print("[Server] Dragon Warz server ready! (with NPC survival system + portals)")

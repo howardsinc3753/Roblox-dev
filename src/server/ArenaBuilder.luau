@@ -4,6 +4,7 @@
 
 local Lighting = game:GetService("Lighting")
 local InsertService = game:GetService("InsertService")
+local CollectionService = game:GetService("CollectionService")
 
 -- Hero piece asset IDs (Meshy + Toolbox). Slot a placeholder cylinder
 -- gets replaced by one of these; falls back to the cylinder if load fails.
@@ -469,7 +470,40 @@ function ArenaBuilder.build()
 	crystalLight.Range = 80
 	crystalLight.Parent = castleCrystal
 
-	print("[ArenaBuilder] Arena built! (Sky Kingdom: 5 towers, 10 clouds, central castle)")
+	-- Return portal to Lair: tagged DragonWarz_Portal_ToLair so init.server.luau
+	-- binds a Touched handler that teleports the player back to the Lair.
+	-- Placed near the south edge of the arena, at altitude 60 — visible from
+	-- typical flight paths, hard to miss.
+	local returnPortal = Instance.new("Part")
+	returnPortal.Name = "PortalToLair"
+	returnPortal.Shape = Enum.PartType.Cylinder
+	returnPortal.Size = Vector3.new(1, 18, 18)
+	returnPortal.CFrame = CFrame.new(0, 60, 220) * CFrame.Angles(0, 0, math.rad(90))
+	returnPortal.Color = Color3.fromRGB(180, 120, 255)
+	returnPortal.Material = Enum.Material.Neon
+	returnPortal.Transparency = 0.2
+	returnPortal.Anchored = true
+	returnPortal.CanCollide = false
+	returnPortal.Parent = workspace
+	CollectionService:AddTag(returnPortal, "DragonWarz_Portal_ToLair")
+
+	-- Floating "RETURN TO LAIR" label
+	local returnLabel = Instance.new("BillboardGui")
+	returnLabel.Size = UDim2.fromOffset(260, 60)
+	returnLabel.StudsOffset = Vector3.new(0, 14, 0)
+	returnLabel.Adornee = returnPortal
+	returnLabel.Parent = returnPortal
+	local txt = Instance.new("TextLabel")
+	txt.Size = UDim2.fromScale(1, 1)
+	txt.BackgroundTransparency = 1
+	txt.Text = "RETURN TO LAIR"
+	txt.TextColor3 = Color3.fromRGB(220, 180, 255)
+	txt.TextStrokeTransparency = 0
+	txt.Font = Enum.Font.GothamBlack
+	txt.TextScaled = true
+	txt.Parent = returnLabel
+
+	print("[ArenaBuilder] Arena built! (Sky Kingdom: 5 towers, 10 clouds, central castle, return portal)")
 end
 
 return ArenaBuilder

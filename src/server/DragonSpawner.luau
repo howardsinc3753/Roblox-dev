@@ -369,15 +369,18 @@ local function attachTrailEffect(dragonModel: Model, dragon: any)
 	trail.Parent = body
 end
 
-function DragonSpawner.spawn(player: Player, dragonId: string): Model
+-- Optional spawnPos override lets the caller drop the player anywhere
+-- (Sprint 5 Part F: init.server.luau passes Lair coords for safe spawning).
+-- If no override is given, falls back to the Arena spawn point ring.
+function DragonSpawner.spawn(player: Player, dragonId: string, spawnPos: Vector3?): Model
 	-- Remove old character if any
 	if player.Character then
 		player.Character:Destroy()
 	end
 
 	local model = buildDragonModel(dragonId, player)
-	local spawnPos = getRandomSpawnPoint()
-	model:PivotTo(CFrame.new(spawnPos))
+	local actualSpawnPos = spawnPos or getRandomSpawnPoint()
+	model:PivotTo(CFrame.new(actualSpawnPos))
 	model.Parent = game.Workspace
 
 	-- If this dragon has a real Meshy mesh, attach it as visual layer
