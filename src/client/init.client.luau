@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local SoundService = game:GetService("SoundService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 
@@ -526,5 +527,42 @@ RunService.Heartbeat:Connect(function(dt: number)
 	-- max, simple math) so safe to run every frame.
 	Awareness.updateCompass()
 end)
+
+-- B key: toggle Dragon Select UI mid-round. Without this, solo playtesters
+-- are stuck on whatever dragon they spawned with for the full 120s round
+-- before the auto-show on RoundEnd lets them switch.
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if gameProcessed then return end
+	if input.KeyCode == Enum.KeyCode.B then
+		DragonSelectUI.toggle()
+	end
+end)
+
+-- Persistent HUD hint so players know about the [B] hotkey without having
+-- to discover it accidentally. Tucked in the top-left so it doesn't compete
+-- with combat indicators.
+do
+	local hintGui = Instance.new("ScreenGui")
+	hintGui.Name = "DragonsHint"
+	hintGui.ResetOnSpawn = false
+	hintGui.Parent = player:WaitForChild("PlayerGui")
+
+	local hint = Instance.new("TextLabel")
+	hint.Size = UDim2.fromOffset(180, 32)
+	hint.Position = UDim2.fromOffset(20, 20)
+	hint.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
+	hint.BackgroundTransparency = 0.3
+	hint.BorderSizePixel = 0
+	hint.Text = "[B] Switch Dragon"
+	hint.TextColor3 = Color3.fromRGB(255, 215, 0)
+	hint.TextStrokeTransparency = 0
+	hint.Font = Enum.Font.GothamBold
+	hint.TextSize = 16
+	hint.Parent = hintGui
+
+	local hintCorner = Instance.new("UICorner")
+	hintCorner.CornerRadius = UDim.new(0, 6)
+	hintCorner.Parent = hint
+end
 
 print(`[Client] {player.Name} Dragon Warz client ready!`)

@@ -298,6 +298,9 @@ function DragonSelectUI.show(intermissionSeconds: number?)
 		screenGui.Enabled = true
 		if intermissionSeconds and screenGui:FindFirstChild("Subtitle") then
 			(screenGui.Subtitle :: TextLabel).Text = `Round starts in {intermissionSeconds}s...`
+		elseif screenGui:FindFirstChild("Subtitle") then
+			-- B-key open during a round: no countdown, generic prompt
+			(screenGui.Subtitle :: TextLabel).Text = "Pick a dragon — press B to close"
 		end
 		-- Free the mouse so players can click cards
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
@@ -307,8 +310,24 @@ end
 function DragonSelectUI.hide()
 	if screenGui then
 		screenGui.Enabled = false
-		-- Caller restores MouseBehavior; here we just relinquish the override
+		-- Re-lock the cursor so combat aim works again. Safe to set even if
+		-- caller has different intent — they can override after.
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 	end
+end
+
+function DragonSelectUI.toggle()
+	if screenGui then
+		if screenGui.Enabled then
+			DragonSelectUI.hide()
+		else
+			DragonSelectUI.show()
+		end
+	end
+end
+
+function DragonSelectUI.isOpen(): boolean
+	return screenGui ~= nil and screenGui.Enabled
 end
 
 function DragonSelectUI.updateCoins(coins: number)

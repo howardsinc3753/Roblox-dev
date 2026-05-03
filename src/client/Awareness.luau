@@ -25,7 +25,7 @@ local camera = workspace.CurrentCamera
 -- Layout constants. Tuned for 1920x1080 baseline; UDim2.fromScale handles
 -- proportional scaling for other resolutions.
 local EDGE_PADDING = 50 -- pixels from screen edge to the indicator
-local COMPASS_TRIANGLE_SIZE = 44 -- bigger so kids actually notice it on screen edge
+local COMPASS_TRIANGLE_SIZE = 56 -- prominent so kids actually notice it on screen edge
 local DAMAGE_ARC_SIZE = 80
 local DAMAGE_FADE_DURATION = 1.5 -- seconds
 local MAX_COMPASS_TRACKED = 5 -- show closest N off-screen entities
@@ -227,6 +227,19 @@ local function getOrCreateArrow(entityId: string, color: Color3): Frame
 	return frame
 end
 
+-- Diagnostic: print compass state when entity count changes. Helps confirm
+-- the loop is running + NPCs are getting tagged. Prints once per change,
+-- not every frame, so it's not spammy.
+local lastCandidateCount = -1
+local lastShownCount = -1
+local function reportCompassDiagnostic(candidateCount: number, shownCount: number)
+	if candidateCount ~= lastCandidateCount or shownCount ~= lastShownCount then
+		print(`[Awareness] tracked={candidateCount} entities, off-screen arrows shown={shownCount}`)
+		lastCandidateCount = candidateCount
+		lastShownCount = shownCount
+	end
+end
+
 -- Per-frame compass update. Called from init.client.luau Heartbeat.
 function Awareness.updateCompass()
 	if not compassContainer then return end
@@ -282,6 +295,7 @@ function Awareness.updateCompass()
 	local shown = math.min(#candidates, MAX_COMPASS_TRACKED)
 
 	-- Render arrows for off-screen entities only
+	local actualShown = 0
 	for i = 1, shown do
 		local c = candidates[i]
 		if not isOnScreen(c.position) then
@@ -291,8 +305,12 @@ function Awareness.updateCompass()
 			arrow.Rotation = rot
 			arrow.Visible = true
 			compassUsedThisFrame[c.id] = true
+			actualShown += 1
 		end
 	end
+
+	-- Diagnostic: only logs on count change (not spammy)
+	reportCompassDiagnostic(#candidates, actualShown)
 
 	-- Hide arrows for entities not used this frame (on-screen, dead, or beyond top-N)
 	for entityId, arrow in compassArrows do
