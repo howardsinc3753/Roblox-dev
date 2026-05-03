@@ -5,11 +5,30 @@
 local DataStoreService = game:GetService("DataStoreService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 
 local PlayerDataTemplate = require(ReplicatedStorage.Shared.Modules:WaitForChild("PlayerDataTemplate"))
+local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 
 local DATA_STORE_NAME = "DragonWarz_PlayerData_v1"
 local SAVE_INTERVAL = 60
+
+-- Studio convenience: unlock the full roster + a coin balance so devs can
+-- test all 6 dragons without grinding kills. RunService:IsStudio() is true
+-- only in the local Studio editor — production builds (published place)
+-- get the normal locked progression. Saving still works in Studio (uses
+-- a separate temporary DataStore session), so this only changes initial
+-- defaults, not subsequent loads.
+local STUDIO_TEST_COINS = 1000
+local function applyStudioOverrides(data: PlayerDataTemplate.PlayerData)
+	if not RunService:IsStudio() then return end
+	for dragonId in DragonConfig do
+		data.unlockedDragons[dragonId] = true
+	end
+	if data.coins < STUDIO_TEST_COINS then
+		data.coins = STUDIO_TEST_COINS
+	end
+end
 
 local DataManager = {}
 
@@ -46,6 +65,7 @@ function DataManager.loadPlayer(player: Player): PlayerDataTemplate.PlayerData
 		data = PlayerDataTemplate.getDefault()
 	end
 
+	applyStudioOverrides(data)
 	cache[userId] = data
 	return data
 end
