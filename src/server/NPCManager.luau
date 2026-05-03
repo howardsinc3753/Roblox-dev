@@ -43,7 +43,6 @@ export type NPCState = {
 	lastBreathTime: number,
 	wanderTarget: Vector3,
 	wanderRetargetAt: number,
-	spawnTime: number,
 }
 
 local npcs: { [number]: NPCState } = {}
@@ -376,7 +375,6 @@ function NPCManager.spawn(enemyType: string): NPCState?
 		lastBreathTime = 0,
 		wanderTarget = randomWanderTarget(),
 		wanderRetargetAt = tick() + math.random(5, 10),
-		spawnTime = tick(),
 	}
 	npcs[id] = state
 	return state

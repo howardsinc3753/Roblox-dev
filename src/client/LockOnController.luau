@@ -15,6 +15,8 @@
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local SoundService = game:GetService("SoundService")
+local TweenService = game:GetService("TweenService")
 
 local LockOnController = {}
 
@@ -80,7 +82,10 @@ local function ensureReticle()
 	highlight.OutlineTransparency = 0 -- solid outline = unmistakable
 	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- visible through walls
 	highlight.Enabled = false
-	highlight.Parent = playerGui
+	-- Parent to workspace (not playerGui). Older Roblox clients had a bug
+	-- where Highlight under PlayerGui rendered inconsistently; workspace
+	-- parenting is the documented-safe path.
+	highlight.Parent = workspace
 
 	labelGui = Instance.new("BillboardGui")
 	labelGui.Name = "LockOnLabel"
@@ -222,6 +227,51 @@ local function findCandidates(): { LockTarget }
 	return result
 end
 
+-- Brief on-screen flash + low-pitched sound so the player knows F was
+-- received but no targets were in cone — distinguishes "broken key" from
+-- "no enemies nearby." Reuses an existing low-volume sound to avoid adding
+-- a new asset dependency.
+local noTargetGui: ScreenGui? = nil
+local function flashNoTarget()
+	-- Build the flash GUI lazily so we don't pollute the player's GUI tree
+	-- if lock-on is never used.
+	if not noTargetGui then
+		noTargetGui = Instance.new("ScreenGui")
+		noTargetGui.Name = "LockOnNoTarget"
+		noTargetGui.ResetOnSpawn = false
+		noTargetGui.Parent = playerGui
+		local label = Instance.new("TextLabel")
+		label.Name = "Text"
+		label.Size = UDim2.fromOffset(280, 40)
+		label.Position = UDim2.new(0.5, -140, 0.6, 0)
+		label.BackgroundTransparency = 1
+		label.Text = "NO TARGET IN VIEW"
+		label.TextColor3 = Color3.fromRGB(255, 200, 80)
+		label.TextStrokeTransparency = 0
+		label.Font = Enum.Font.GothamBlack
+		label.TextScaled = true
+		label.TextTransparency = 1 -- start hidden; tween brings it in
+		label.Parent = noTargetGui
+	end
+	local label = noTargetGui:FindFirstChild("Text") :: TextLabel?
+	if not label then return end
+	label.TextTransparency = 0
+	-- Fade out over 0.6s
+	TweenService:Create(label, TweenInfo.new(0.6, Enum.EasingStyle.Quad), {
+		TextTransparency = 1,
+	}):Play()
+
+	-- Soft "denied" beep — short, low pitch, very quiet so it doesn't compete
+	-- with combat sounds. Uses an existing audio ID rather than a new asset.
+	local sound = Instance.new("Sound")
+	sound.SoundId = "rbxassetid://9114444008" -- Fire Whoosh, repurposed
+	sound.Volume = 0.4
+	sound.PlaybackSpeed = 0.5 -- low pitch = "denied" feel
+	sound.Parent = SoundService
+	sound:Play()
+	sound.Ended:Connect(function() sound:Destroy() end)
+end
+
 -- F key handler: cycle through candidates. No-lock + press = lock nearest.
 -- Locked + press = cycle to next nearest. No candidates = unlock.
 function LockOnController.onLockKeyPressed()
@@ -231,6 +281,7 @@ function LockOnController.onLockKeyPressed()
 	-- the input wasn't received vs. because no enemies were in cone+range.
 	print(`[LockOn] F pressed. Candidates in cone+range: {#candidates}`)
 	if #candidates == 0 then
+		flashNoTarget() -- visible + audible "received but nothing to lock"
 		clearLock()
 		return
 	end
@@ -276,11 +327,15 @@ function LockOnController.update()
 			clearLock()
 			return
 		end
-		-- Player respawned or switched dragons → re-point reticle to new model
+		-- Player respawned or switched dragons → re-point reticle to new model.
+		-- Bug fix: the old code referenced `reticleGui` which doesn't exist;
+		-- reticle visuals are split across `highlight` (model adornee) and
+		-- `labelGui` (rootPart adornee). Both must be re-pointed.
 		if currentTarget.model ~= target.Character then
 			currentTarget.model = target.Character
 			currentTarget.rootPart = target.Character.PrimaryPart :: BasePart
-			if reticleGui then reticleGui.Adornee = currentTarget.rootPart end
+			if highlight then highlight.Adornee = currentTarget.model end
+			if labelGui then labelGui.Adornee = currentTarget.rootPart end
 		end
 	elseif currentTarget.kind == "npc" then
 		if not currentTarget.model.Parent or not currentTarget.model.PrimaryPart then
