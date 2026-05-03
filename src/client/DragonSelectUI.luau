@@ -355,4 +355,96 @@ function DragonSelectUI.updateSubtitle(text: string)
 	end
 end
 
+-- ============================================================================
+-- GAMEPAD NAVIGATION (PS5/Xbox)
+-- ============================================================================
+-- The 3-column × 2-row grid maps to D-pad navigation: Up/Down moves rows,
+-- Left/Right moves columns. A button = "click this card" (delegates to the
+-- same handler the mouse uses). B button = close the menu. Y button = open.
+-- The "selected for navigation" cursor is a UIStroke we toggle on/off as the
+-- gamepad cursor moves around the grid (separate from the "equipped" stroke
+-- that's part of normal card rendering).
+
+local GAMEPAD_COLS = 3
+local GAMEPAD_ROWS = 2 -- DRAGON_ORDER has 6 entries; matches grid
+
+-- The cursor index is into DRAGON_ORDER: 1..6. We map back and forth with
+-- (col, row) = ((idx-1) % cols + 1, math.floor((idx-1) / cols) + 1).
+local cursorIndex = 1
+local cursorStroke: UIStroke? = nil
+
+local function applyCursorVisual()
+	-- Remove old highlight
+	if cursorStroke then
+		cursorStroke:Destroy()
+		cursorStroke = nil
+	end
+	-- Apply highlight to current cursor card
+	local dragonId = DRAGON_ORDER[cursorIndex]
+	local cardWrap = dragonCards[dragonId]
+	if not cardWrap then return end
+	local stroke = Instance.new("UIStroke")
+	stroke.Name = "GamepadCursor"
+	stroke.Color = Color3.fromRGB(120, 220, 255) -- distinct cyan vs the equipped stroke
+	stroke.Thickness = 5
+	stroke.Parent = cardWrap.card
+	cursorStroke = stroke
+end
+
+local function moveCursor(dx: number, dy: number)
+	local col = ((cursorIndex - 1) % GAMEPAD_COLS) + 1
+	local row = math.floor((cursorIndex - 1) / GAMEPAD_COLS) + 1
+	col = math.clamp(col + dx, 1, GAMEPAD_COLS)
+	row = math.clamp(row + dy, 1, GAMEPAD_ROWS)
+	cursorIndex = math.clamp((row - 1) * GAMEPAD_COLS + col, 1, #DRAGON_ORDER)
+	applyCursorVisual()
+end
+
+local function confirmCursorSelection()
+	local dragonId = DRAGON_ORDER[cursorIndex]
+	if not dragonId then return end
+	-- Reuse the existing click handler logic (select if unlocked, buy if affordable)
+	local dragon = DragonConfig[dragonId]
+	if not dragon then return end
+	local isUnlocked = cachedUnlocks[dragonId] == true
+	if isUnlocked then
+		if selectDragonRemote then selectDragonRemote:FireServer(dragonId) end
+		cachedSelected = dragonId
+		refreshAllCards()
+		applyCursorVisual() -- refresh restored the stroke; reapply cursor on top
+	else
+		if cachedCoins >= dragon.cost then
+			if unlockDragonRemote then unlockDragonRemote:FireServer(dragonId) end
+			cachedUnlocks[dragonId] = true
+			cachedCoins -= dragon.cost
+			refreshAllCards()
+			applyCursorVisual()
+		end
+	end
+end
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	-- Y / Triangle: open menu mid-round (toggleable). Always responsive
+	-- regardless of menu state, like a pause button.
+	if input.KeyCode == Enum.KeyCode.ButtonY then
+		DragonSelectUI.toggle()
+		if DragonSelectUI.isOpen() then
+			cursorIndex = 1
+			applyCursorVisual()
+		end
+		return
+	end
+
+	-- All other gamepad bindings only matter while the menu is open.
+	if not DragonSelectUI.isOpen() then return end
+	if gameProcessed then return end
+
+	if input.KeyCode == Enum.KeyCode.DPadLeft then moveCursor(-1, 0) end
+	if input.KeyCode == Enum.KeyCode.DPadRight then moveCursor(1, 0) end
+	if input.KeyCode == Enum.KeyCode.DPadUp then moveCursor(0, -1) end
+	if input.KeyCode == Enum.KeyCode.DPadDown then moveCursor(0, 1) end
+	if input.KeyCode == Enum.KeyCode.ButtonA then confirmCursorSelection() end
+	if input.KeyCode == Enum.KeyCode.ButtonB then DragonSelectUI.hide() end
+end)
+
 return DragonSelectUI

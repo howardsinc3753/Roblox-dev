@@ -1,9 +1,15 @@
 --!strict
 -- Third-person camera that follows the dragon.
--- Mouse-look for aiming, mouse wheel for zoom, FOV punch on boost.
--- Camera direction is mouse-driven (yaw/pitch), independent of the dragon's
+-- Aim sources (any of these drives yaw/pitch each frame):
+--   - Mouse movement (KB+M)
+--   - Right Stick / Thumbstick2 (PS5/Xbox gamepad)
+-- Zoom: mouse wheel OR D-pad up/down on gamepad.
+-- FOV punch on boost stays the same.
+--
+-- Camera direction is INPUT-driven (yaw/pitch), independent of the dragon's
 -- body orientation — so velocity-tilt and wobble on the body do NOT shake
--- the camera or affect aim.
+-- the camera or affect aim. This is a hard requirement for console feel:
+-- if the body's wobble shook the camera, thumbstick aim would be unusable.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -26,6 +32,16 @@ local FIRST_PERSON_THRESHOLD = 0.05 -- below this, snap to first-person
 local CAMERA_SENSITIVITY = 0.3
 local CAMERA_SMOOTH_RATE = 12 -- per second; ~0.2 alpha at 60fps, frame-rate independent
 local ZOOM_SENSITIVITY = 0.1
+-- Right-stick aim. Sensitivity expressed as degrees-per-second at full deflection
+-- (stick all the way) so it's frame-rate independent. Pitch slower than yaw
+-- because vertical aim is rarely useful in flight games and over-fast pitch
+-- nausea is a console-game review killer.
+local GAMEPAD_LOOK_DEADZONE = 0.18
+local GAMEPAD_YAW_SPEED = 180 -- deg/sec at full stick
+local GAMEPAD_PITCH_SPEED = 120 -- deg/sec at full stick
+local GAMEPAD_ZOOM_TICK = 0.25 -- D-pad press = zoom by this fraction (cap 0..1)
+-- Cached right-stick value, updated in InputChanged, consumed in RenderStepped
+local rightStick = Vector2.zero
 
 -- FOV punch: lerps to BOOST FOV while boosting, back to DEFAULT when not.
 local FOV_DEFAULT = 70
@@ -58,7 +74,11 @@ function CameraController.enable()
 	enabled = true
 	camera.CameraType = Enum.CameraType.Scriptable
 	camera.FieldOfView = FOV_DEFAULT
-	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	-- Only lock the mouse if it's actually present (KB+M). Console players
+	-- have no mouse — locking it confuses Roblox's input system on TVs.
+	if UserInputService.MouseEnabled then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	end
 end
 
 function CameraController.disable()
@@ -71,7 +91,7 @@ function CameraController.disable()
 	wasFirstPerson = false
 end
 
--- Mouse movement = look. Mouse wheel = zoom.
+-- Mouse movement = look. Mouse wheel = zoom. Right Stick = look (gamepad).
 UserInputService.InputChanged:Connect(function(input: InputObject)
 	if not enabled then return end
 	if input.UserInputType == Enum.UserInputType.MouseMovement then
@@ -80,6 +100,37 @@ UserInputService.InputChanged:Connect(function(input: InputObject)
 	elseif input.UserInputType == Enum.UserInputType.MouseWheel then
 		-- input.Position.Z is +1 (scroll up = zoom in) or -1 (scroll down = zoom out)
 		zoomLevel = math.clamp(zoomLevel - input.Position.Z * ZOOM_SENSITIVITY, 0, 1)
+	elseif input.KeyCode == Enum.KeyCode.Thumbstick2 then
+		-- Cache right stick. We integrate it per-frame in RenderStepped so the
+		-- camera scales with frame time (otherwise low-FPS clients aim slower).
+		local raw = Vector2.new(input.Position.X, input.Position.Y)
+		local mag = raw.Magnitude
+		if mag < GAMEPAD_LOOK_DEADZONE then
+			rightStick = Vector2.zero
+		else
+			local rescaled = (mag - GAMEPAD_LOOK_DEADZONE) / (1 - GAMEPAD_LOOK_DEADZONE)
+			rightStick = raw.Unit * math.min(rescaled, 1)
+		end
+	end
+end)
+
+-- D-pad up/down = zoom (gamepad equivalent of mouse wheel). One press = step.
+-- Discrete steps are easier to control on D-pad than a held axis.
+-- Gated when the dragon-select menu is open (D-pad navigates cards there).
+local function isMenuOpen(): boolean
+	local pg = player:FindFirstChild("PlayerGui") :: PlayerGui?
+	if not pg then return false end
+	local dragonSelect = pg:FindFirstChild("DragonSelectUI") :: ScreenGui?
+	return dragonSelect ~= nil and dragonSelect.Enabled
+end
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if gameProcessed or not enabled then return end
+	if isMenuOpen() then return end -- let DragonSelectUI consume D-pad
+	if input.KeyCode == Enum.KeyCode.DPadUp then
+		zoomLevel = math.clamp(zoomLevel - GAMEPAD_ZOOM_TICK, 0, 1)
+	elseif input.KeyCode == Enum.KeyCode.DPadDown then
+		zoomLevel = math.clamp(zoomLevel + GAMEPAD_ZOOM_TICK, 0, 1)
 	end
 end)
 
@@ -92,6 +143,14 @@ RunService.RenderStepped:Connect(function(dt: number)
 
 	local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not rootPart then return end
+
+	-- Apply right-stick aim integrated over dt. Frame-rate independent so a
+	-- 30fps console player and a 60fps PC player aim at the same speed at
+	-- the same stick deflection.
+	if rightStick.Magnitude > 0 then
+		yaw -= rightStick.X * GAMEPAD_YAW_SPEED * dt
+		pitch = math.clamp(pitch + rightStick.Y * GAMEPAD_PITCH_SPEED * dt, -60, 60)
+	end
 
 	local dragonPos = rootPart.Position
 	local isFirstPerson = zoomLevel < FIRST_PERSON_THRESHOLD

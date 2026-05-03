@@ -1,6 +1,15 @@
 --!strict
--- Handles dragon flight input: WASD movement, mouse aiming, boost.
--- Updates BodyVelocity and BodyGyro on the dragon's HumanoidRootPart.
+-- Handles dragon flight input: WASD/keyboard OR PS5/Xbox gamepad, mouse/right-stick
+-- aiming, boost. Updates LinearVelocity/AlignOrientation on the dragon's body.
+--
+-- Gamepad bindings (Xbox names; PS5 equivalents auto-mapped by Roblox):
+--   Left Stick (Thumbstick1) → camera-relative move (XZ plane)
+--   RB (ButtonR1) → ascend
+--   LB (ButtonL1) → descend
+--   A  (ButtonA)  → boost (hold)
+-- Keyboard bindings stay live in parallel — players using both KB+M AND a
+-- gamepad get OR-merged input (last input wins per axis), which is what
+-- couch-co-op/console expects.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -14,7 +23,7 @@ local FlightController = {}
 local player = Players.LocalPlayer
 local camera = game.Workspace.CurrentCamera
 
--- Input state
+-- Keyboard input state (boolean per direction)
 local moveForward = false
 local moveBack = false
 local moveLeft = false
@@ -22,6 +31,16 @@ local moveRight = false
 local moveUp = false
 local moveDown = false
 local boosting = false
+
+-- Gamepad input state. Left stick is analog (Vector2 -1..1), so we store
+-- the latest stick value rather than booleans. ButtonR1/L1/A toggle the
+-- gamepad-side ascend/descend/boost flags. The heartbeat merges keyboard
+-- + gamepad before computing final movement.
+local gamepadStick = Vector2.zero
+local gamepadAscend = false
+local gamepadDescend = false
+local gamepadBoost = false
+local GAMEPAD_DEADZONE = 0.18 -- thumbstick rest jitter; below this we treat as zero
 
 -- Boost meter
 local boostMeter = 100
@@ -77,10 +96,14 @@ function FlightController.isBoosting(): boolean
 	return boosting and boostMeter > 0
 end
 
--- Input bindings
+-- ============================================================================
+-- INPUT BINDINGS — keyboard + gamepad in parallel
+-- ============================================================================
+
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then return end
 
+	-- Keyboard
 	if input.KeyCode == Enum.KeyCode.W then moveForward = true end
 	if input.KeyCode == Enum.KeyCode.S then moveBack = true end
 	if input.KeyCode == Enum.KeyCode.A then moveLeft = true end
@@ -88,6 +111,11 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 	if input.KeyCode == Enum.KeyCode.Space then moveUp = true end
 	if input.KeyCode == Enum.KeyCode.LeftShift then moveDown = true end
 	if input.KeyCode == Enum.KeyCode.Q then boosting = true end
+
+	-- Gamepad — Roblox auto-maps Xbox enums to PS5 buttons at runtime
+	if input.KeyCode == Enum.KeyCode.ButtonR1 then gamepadAscend = true end
+	if input.KeyCode == Enum.KeyCode.ButtonL1 then gamepadDescend = true end
+	if input.KeyCode == Enum.KeyCode.ButtonA then gamepadBoost = true end
 end)
 
 UserInputService.InputEnded:Connect(function(input: InputObject)
@@ -98,6 +126,28 @@ UserInputService.InputEnded:Connect(function(input: InputObject)
 	if input.KeyCode == Enum.KeyCode.Space then moveUp = false end
 	if input.KeyCode == Enum.KeyCode.LeftShift then moveDown = false end
 	if input.KeyCode == Enum.KeyCode.Q then boosting = false end
+
+	if input.KeyCode == Enum.KeyCode.ButtonR1 then gamepadAscend = false end
+	if input.KeyCode == Enum.KeyCode.ButtonL1 then gamepadDescend = false end
+	if input.KeyCode == Enum.KeyCode.ButtonA then gamepadBoost = false end
+end)
+
+-- Thumbstick is reported via InputChanged; we cache the latest Vector2 and
+-- read it during the heartbeat. Roblox emits this every time the stick value
+-- changes, including when it returns to center.
+UserInputService.InputChanged:Connect(function(input: InputObject)
+	if input.KeyCode == Enum.KeyCode.Thumbstick1 then
+		local raw = Vector2.new(input.Position.X, input.Position.Y)
+		-- Apply deadzone: tiny stick values from rest jitter become zero.
+		-- Beyond the deadzone, rescale so the player gets full -1..1 range.
+		local mag = raw.Magnitude
+		if mag < GAMEPAD_DEADZONE then
+			gamepadStick = Vector2.zero
+		else
+			local rescaled = (mag - GAMEPAD_DEADZONE) / (1 - GAMEPAD_DEADZONE)
+			gamepadStick = raw.Unit * math.min(rescaled, 1)
+		end
+	end
 end)
 
 -- Main flight update loop
@@ -119,31 +169,49 @@ RunService.Heartbeat:Connect(function(dt: number)
 
 	local baseSpeed = dragon.speed
 
-	-- Boost logic
+	-- Boost: keyboard Q OR gamepad A (held). Whichever is true wins.
+	local effectiveBoost = boosting or gamepadBoost
 	local speedMultiplier = 1
-	if boosting and boostMeter > 0 then
+	if effectiveBoost and boostMeter > 0 then
 		speedMultiplier = BOOST_MULTIPLIER
 		boostMeter = math.max(0, boostMeter - BOOST_DRAIN * dt)
 	else
 		boostMeter = math.min(BOOST_MAX, boostMeter + BOOST_RECHARGE * dt)
 	end
+	-- Update the canonical `boosting` flag so isBoosting() reads correctly
+	-- regardless of input source (camera FOV punch reads this).
+	boosting = effectiveBoost
 
 	local speed = baseSpeed * speedMultiplier
 
-	-- Camera-relative movement
+	-- Camera-relative movement frame
 	local camCF = camera.CFrame
 	local lookVector = camCF.LookVector
 	local rightVector = camCF.RightVector
 
-	local moveDirection = Vector3.zero
+	-- Build the XZ-plane move vector by merging keyboard digital + gamepad
+	-- analog sources. Keyboard contributes ±1 per axis; gamepad contributes
+	-- the analog stick value (-1..1). Where both are pressed, they sum and
+	-- get clamped by .Unit normalization below.
+	local moveX = 0 -- right (+) / left (-)
+	local moveZ = 0 -- forward (+) / back (-)
+	if moveForward then moveZ += 1 end
+	if moveBack then moveZ -= 1 end
+	if moveRight then moveX += 1 end
+	if moveLeft then moveX -= 1 end
+	-- Gamepad left stick: X = horizontal, Y = vertical (forward is +Y in Roblox)
+	moveX += gamepadStick.X
+	moveZ += gamepadStick.Y
 
-	if moveForward then moveDirection += lookVector end
-	if moveBack then moveDirection -= lookVector end
-	if moveRight then moveDirection += rightVector end
-	if moveLeft then moveDirection -= rightVector end
-	if moveUp then moveDirection += Vector3.new(0, 1, 0) end
-	if moveDown then moveDirection -= Vector3.new(0, 1, 0) end
+	-- Vertical: Space/Shift on KB, RB/LB on gamepad. OR-merged.
+	local moveY = 0
+	if moveUp or gamepadAscend then moveY += 1 end
+	if moveDown or gamepadDescend then moveY -= 1 end
 
+	-- Compose into world-space movement. moveX/moveZ are camera-relative,
+	-- moveY is always world-vertical so the player can climb regardless of
+	-- where they're looking (consistent with arcade flight games).
+	local moveDirection = (rightVector * moveX) + (lookVector * moveZ) + Vector3.new(0, moveY, 0)
 	if moveDirection.Magnitude > 0 then
 		moveDirection = moveDirection.Unit
 	end

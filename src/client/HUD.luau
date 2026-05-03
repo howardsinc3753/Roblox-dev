@@ -4,8 +4,15 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+
+-- Two control hint strings — swapped at runtime when the player toggles input
+-- device. Console text is shorter because TVs sit further back; smaller, denser
+-- text becomes unreadable.
+local CONTROLS_KBM = "WASD: Move | Space/Shift: Up/Down | Q: Boost | LMB: Attack | E: Special | Y: Open Menu"
+local CONTROLS_GAMEPAD = "L Stick: Move | RB/LB: Up/Down | A: Boost | RT: Attack | LT: Special | Y: Menu"
 
 local HUD = {}
 
@@ -319,18 +326,50 @@ function HUD.create()
 	specialOverlayFrame.Parent = specialCooldownFrame
 
 	-- === CONTROLS HINT (bottom center-left) ===
+	-- Auto-switches between KB+M and gamepad strings as the player swaps
+	-- input devices. Roblox fires LastInputTypeChanged on every input, so
+	-- this stays correct in real time without polling.
 	local controlsLabel = Instance.new("TextLabel")
 	controlsLabel.Name = "Controls"
-	controlsLabel.Size = UDim2.fromOffset(350, 30)
+	-- Wider for console — TV viewing distance + bigger button labels.
+	controlsLabel.Size = UDim2.fromOffset(550, 30)
 	controlsLabel.Position = UDim2.new(0, 10, 0.98, -5)
 	controlsLabel.AnchorPoint = Vector2.new(0, 1)
 	controlsLabel.BackgroundTransparency = 1
 	controlsLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-	controlsLabel.Text = "WASD: Move | Space/Shift: Up/Down | Q: Boost | LMB: Attack | E: Special"
+	controlsLabel.Text = CONTROLS_KBM -- default to KB+M; flips on first gamepad input
 	controlsLabel.Font = Enum.Font.Gotham
 	controlsLabel.TextScaled = true
 	controlsLabel.TextXAlignment = Enum.TextXAlignment.Left
 	controlsLabel.Parent = screenGui
+
+	-- Initial check + live updates. Pre-populate based on the type of the
+	-- last input Roblox saw before we created the label, then keep it in sync.
+	local function isGamepadInput(inputType: Enum.UserInputType): boolean
+		return inputType == Enum.UserInputType.Gamepad1
+			or inputType == Enum.UserInputType.Gamepad2
+			or inputType == Enum.UserInputType.Gamepad3
+			or inputType == Enum.UserInputType.Gamepad4
+			or inputType == Enum.UserInputType.Gamepad5
+			or inputType == Enum.UserInputType.Gamepad6
+			or inputType == Enum.UserInputType.Gamepad7
+			or inputType == Enum.UserInputType.Gamepad8
+	end
+	if isGamepadInput(UserInputService:GetLastInputType()) then
+		controlsLabel.Text = CONTROLS_GAMEPAD
+	end
+	UserInputService.LastInputTypeChanged:Connect(function(inputType: Enum.UserInputType)
+		if isGamepadInput(inputType) then
+			controlsLabel.Text = CONTROLS_GAMEPAD
+		elseif inputType == Enum.UserInputType.Keyboard
+			or inputType == Enum.UserInputType.MouseMovement
+			or inputType == Enum.UserInputType.MouseButton1
+			or inputType == Enum.UserInputType.MouseButton2 then
+			controlsLabel.Text = CONTROLS_KBM
+		end
+		-- Touch is ignored for now (Option D was scoped to console; mobile
+		-- support is a separate sprint).
+	end)
 end
 
 function HUD.updateHealth(current: number, max: number)

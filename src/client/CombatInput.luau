@@ -274,67 +274,81 @@ local function createBreathEffect(origin: Vector3, direction: Vector3, element: 
 	end)
 end
 
--- Input handlers
-UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
-	if gameProcessed or not enabled then return end
+-- ============================================================================
+-- INPUT HANDLERS — keyboard/mouse OR PS5/Xbox gamepad
+-- ============================================================================
+-- Refactored from inline branches to two action handlers (fireBreath /
+-- fireSpecial) so the same code path serves both LMB and RT, and both
+-- E-key and LT. Adding more input sources later only needs a new bind
+-- in InputBegan, not a code-duplicated branch.
 
-	-- Left click: Breath attack
-	if input.UserInputType == Enum.UserInputType.MouseButton1 then
-		if (tick() - lastBreathTime) < BREATH_COOLDOWN then return end
+local function fireBreath()
+	if not enabled then return end
+	if (tick() - lastBreathTime) < BREATH_COOLDOWN then return end
 
-		local character = player.Character
-		if not character or not character.PrimaryPart then return end
+	local character = player.Character
+	if not character or not character.PrimaryPart then return end
 
-		local origin = character.PrimaryPart.Position + camera.CFrame.LookVector * 5
-		local direction = camera.CFrame.LookVector
+	local origin = character.PrimaryPart.Position + camera.CFrame.LookVector * 5
+	local direction = camera.CFrame.LookVector
 
-		-- Aim assist: if a target is locked AND within ~30deg of camera,
-		-- snap firing direction to point exactly at target. Casual aim help
-		-- without bypassing skill — you still have to roughly aim. Server
-		-- still validates the resulting direction with its own cone test,
-		-- so this is safe (can't be exploited to fire backward).
-		local lockedTarget = LockOnController.getLockedTarget()
-		if lockedTarget and lockedTarget.rootPart and lockedTarget.rootPart.Parent then
-			local toTarget = lockedTarget.rootPart.Position - origin
-			if toTarget.Magnitude > 0.001 then
-				local targetDir = toTarget.Unit
-				-- 0.866 = cos(30deg). Within that, snap. Outside, use camera as-is.
-				if direction:Dot(targetDir) > 0.866 then
-					direction = targetDir
-				end
+	-- Aim assist: if a target is locked AND within ~30deg of camera,
+	-- snap firing direction to point exactly at target. Casual aim help
+	-- without bypassing skill — you still have to roughly aim. Server
+	-- still validates the resulting direction with its own cone test,
+	-- so this is safe (can't be exploited to fire backward).
+	-- This is doubly important on console: thumbstick aim is less precise
+	-- than a mouse, so the snap is more frequently the difference between
+	-- "hit" and "miss" for kids.
+	local lockedTarget = LockOnController.getLockedTarget()
+	if lockedTarget and lockedTarget.rootPart and lockedTarget.rootPart.Parent then
+		local toTarget = lockedTarget.rootPart.Position - origin
+		if toTarget.Magnitude > 0.001 then
+			local targetDir = toTarget.Unit
+			if direction:Dot(targetDir) > 0.866 then
+				direction = targetDir
 			end
-		end
-
-		lastBreathTime = tick()
-
-		-- Send to server (aim-assisted direction, server cone-tests it)
-		if fireBreathRemote then
-			fireBreathRemote:FireServer(origin, direction)
-		end
-
-		-- Visual effect + sound — pass element so projectile reads as its type
-		local dragon = DragonConfig[currentDragonId]
-		if dragon then
-			createBreathEffect(origin, direction, dragon.element, dragon.color)
-			playQuickSound("rbxassetid://9114444008", 1.5, 1.2) -- Fire Whoosh 3 (SFX)
 		end
 	end
 
-	-- E key or Right click: Special ability
-	if input.KeyCode == Enum.KeyCode.E or input.UserInputType == Enum.UserInputType.MouseButton2 then
-		if (tick() - lastSpecialTime) < SPECIAL_COOLDOWN then return end
+	lastBreathTime = tick()
 
-		lastSpecialTime = tick()
+	if fireBreathRemote then
+		fireBreathRemote:FireServer(origin, direction)
+	end
 
-		-- Send camera direction so the server can cone-aim Fire/Lightning
-		-- specials where the player is *looking* instead of where the body
-		-- is *facing*. Body has velocity-tilt that would otherwise aim the
-		-- vortex 30deg below your crosshair while diving.
-		if useSpecialRemote then
-			useSpecialRemote:FireServer(camera.CFrame.LookVector)
-		end
+	local dragon = DragonConfig[currentDragonId]
+	if dragon then
+		createBreathEffect(origin, direction, dragon.element, dragon.color)
+		playQuickSound("rbxassetid://9114444008", 1.5, 1.2) -- Fire Whoosh 3 (SFX)
+	end
+end
 
-		-- TODO: special ability visual effects per element
+local function fireSpecial()
+	if not enabled then return end
+	if (tick() - lastSpecialTime) < SPECIAL_COOLDOWN then return end
+
+	lastSpecialTime = tick()
+
+	if useSpecialRemote then
+		useSpecialRemote:FireServer(camera.CFrame.LookVector)
+	end
+end
+
+UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	if gameProcessed then return end
+
+	-- Breath attack: LMB (mouse) OR RT (R2 on PS5, Right Trigger on Xbox)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.KeyCode == Enum.KeyCode.ButtonR2 then
+		fireBreath()
+	end
+
+	-- Special ability: E (keyboard), Right Click, OR LT (L2 / Left Trigger)
+	if input.KeyCode == Enum.KeyCode.E
+		or input.UserInputType == Enum.UserInputType.MouseButton2
+		or input.KeyCode == Enum.KeyCode.ButtonL2 then
+		fireSpecial()
 	end
 end)
 
