@@ -9,6 +9,8 @@ local InsertService = game:GetService("InsertService")
 -- gets replaced by one of these; falls back to the cylinder if load fails.
 local TOWER_ASSET_GUARD = 101559450428915 -- guard tower
 local TOWER_ASSET_WIZARD = 5408278132 -- wizard tower
+local SKY_ATMOSPHERE_ASSET = 4607457995 -- Atmosphere/Sky preset, parented to Lighting
+local GRASS_BASE_ASSET = 12132147781 -- big grass platform, placed far below for ground feel
 
 -- Loads a Roblox Model asset, scales + positions it, anchors all parts,
 -- and parents it into Workspace. Returns the cloned model or nil on
@@ -357,10 +359,52 @@ function ArenaBuilder.build()
 		) * CFrame.Angles(0, 0, math.rad(90))
 		cloud.Color = Color3.fromRGB(240, 245, 255)
 		cloud.Material = Enum.Material.SmoothPlastic
-		cloud.Transparency = 0.15
+		cloud.Transparency = 0.6 -- bumped from 0.15: more cloud-like, less "white disk"
 		cloud.Anchored = true
-		cloud.CanCollide = true
+		-- CanCollide=false (was true). User feedback: "white disk you can't
+		-- fly through" felt like solid scenery, not cloud. Decorative-only
+		-- now — dragons can fly straight through, removes the navigation
+		-- frustration. Lose the "land on a cloud" feature; gain the freedom.
+		cloud.CanCollide = false
 		cloud.Parent = game.Workspace
+	end
+
+	-- Sky Atmosphere preset (user-supplied asset). LoadAsset returns a Model
+	-- wrapper containing whatever atmospheric instances were saved (Atmosphere,
+	-- Sky/Skybox, possibly ColorCorrectionEffect). We extract those and parent
+	-- them to Lighting where Roblox expects them. Existing default Atmosphere
+	-- (if any) gets replaced — only one Atmosphere instance is honored.
+	local atmoOk, atmoResult = pcall(function()
+		return InsertService:LoadAsset(SKY_ATMOSPHERE_ASSET)
+	end)
+	if atmoOk and atmoResult then
+		for _, instance in atmoResult:GetDescendants() do
+			if instance:IsA("Atmosphere") or instance:IsA("Sky") or instance:IsA("Clouds") then
+				-- Remove any existing same-class instance under Lighting first
+				for _, existing in Lighting:GetChildren() do
+					if existing.ClassName == instance.ClassName then
+						existing:Destroy()
+					end
+				end
+				instance:Clone().Parent = Lighting
+			end
+		end
+		atmoResult:Destroy()
+	else
+		warn(`[ArenaBuilder] Failed to load Sky Atmosphere asset {SKY_ATMOSPHERE_ASSET}: {atmoResult}`)
+	end
+
+	-- Grass Base: huge platform placed far below the floating arena. Gives
+	-- the world a sense of "down there's the ground" — fixes the "everything
+	-- floats in nothing" feel. Players can't reach it (kill boundary at
+	-- Y=-50 stops them well before this), pure visual atmosphere.
+	local grassBase = loadHeroPiece(
+		GRASS_BASE_ASSET,
+		CFrame.new(0, -300, 0),
+		8 -- scale; tune if too small/large
+	)
+	if grassBase then
+		grassBase.Name = "WorldGroundGrass"
 	end
 
 	-- Sky Castle placeholder: large stone block at arena center, raised
