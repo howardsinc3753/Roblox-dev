@@ -60,6 +60,8 @@ local Dragons: { [string]: DragonStats } = {
 		color = Color3.fromRGB(255, 255, 50),
 		secondaryColor = Color3.fromRGB(150, 80, 255),
 		cost = 100,
+		meshAssetId = 118836377435399, -- Meshy lightning storm dragon
+		meshScale = 4,
 	},
 	Terra = {
 		name = "Terra",
