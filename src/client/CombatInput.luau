@@ -10,7 +10,6 @@ local TweenService = game:GetService("TweenService")
 local SoundService = game:GetService("SoundService")
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 local LockOnController = require(script.Parent.LockOnController)
-local DragonSelectUI = require(script.Parent.DragonSelectUI)
 
 local CombatInput = {}
 
@@ -348,12 +347,6 @@ end
 
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then return end
-	-- Hard gate: combat inputs are dropped while the dragon-select menu is
-	-- open. The kid clicking through the menu shouldn't accidentally fire
-	-- breath at whoever's behind the modal. fireBreath/fireSpecial themselves
-	-- already check `enabled`, but `enabled` is on for the round even with
-	-- the menu open — we need a second guard for the menu specifically.
-	if DragonSelectUI.isOpen() then return end
 
 	-- Breath attack: LMB (mouse) OR RT (R2 on PS5, Right Trigger on Xbox)
 	if input.UserInputType == Enum.UserInputType.MouseButton1

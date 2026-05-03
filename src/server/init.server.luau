@@ -17,7 +17,6 @@ local DragonSpawner = require(script.DragonSpawner)
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 local ArenaBuilder = require(script.ArenaBuilder)
 local NPCManager = require(script.NPCManager)
-local RateLimiter = require(script.RateLimiter)
 
 print("[Server] Dragon Warz server starting...")
 
@@ -92,10 +91,8 @@ end)
 -- REMOTE EVENT HANDLERS
 -- ================================
 
--- Dragon selection. Rate-limit: 5/sec is more than any realistic UI use
--- (one click on a card per ~300ms), but tight enough to drop a remote spam.
+-- Dragon selection
 selectDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unknown)
-	if not RateLimiter.check(player, "SelectDragon", 5) then return end
 	if typeof(dragonId) ~= "string" then return end
 	local id = dragonId :: string
 
@@ -111,11 +108,8 @@ selectDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 	spawnDragonRemote:FireClient(player, id)
 end)
 
--- Dragon unlock. Tight 2/sec limit — buying is rare, no legitimate need
--- to fire faster. Server also rejects already-owned + insufficient funds,
--- but the rate limit makes those server-side checks cheaper to amortize.
+-- Dragon unlock
 unlockDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unknown)
-	if not RateLimiter.check(player, "UnlockDragon", 2) then return end
 	if typeof(dragonId) ~= "string" then return end
 	local id = dragonId :: string
 
@@ -137,11 +131,8 @@ end)
 -- a brief warning to the targeted player so they know to dodge. We don't
 -- track persistent state — each client message is "this is who I'm locked
 -- on right now" and we ping the target once. Thrash-spammy clients are
--- self-limited because LockOnController only sends on state changes,
--- but we still rate-limit at 10/sec defensively to prevent harassment
--- spam (rapid lock cycling could be used to spam lock-warning sounds).
+-- self-limited because LockOnController only sends on state changes.
 lockOnTargetRemote.OnServerEvent:Connect(function(player: Player, targetUserId: unknown)
-	if not RateLimiter.check(player, "LockOnTarget", 10) then return end
 	if typeof(targetUserId) ~= "number" then return end
 	if targetUserId == 0 then return end -- 0 = unlocked, no warning needed
 	if targetUserId == player.UserId then return end -- can't lock self
@@ -154,13 +145,8 @@ end)
 -- Breath attack: checks players first, then NPCs (priority: PvP fights take
 -- precedence when both are in the cone, so cooperating against NPCs doesn't
 -- accidentally heal the human meta).
--- Rate limit: 5/sec is 2.5x the legitimate cooldown rate (0.5s = 2/sec).
--- The buffer absorbs frame-rate jitter and keyboard-mashing kids without
--- punishing real play. canFireBreath cooldown still rejects most calls; the
--- rate limit just stops a packet flood from eating server CPU on cone-checks.
-fireBreathRemote.OnServerEvent:Connect(function(player: Player, clientOrigin: unknown, direction: unknown)
-	if not RateLimiter.check(player, "FireBreath", 5) then return end
-	if typeof(clientOrigin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
+fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown, direction: unknown)
+	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
 	if not CombatManager.canFireBreath(player) then return end
 	if not RoundManager.isActive() then return end
 
@@ -172,32 +158,6 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, clientOrigin: un
 	local dragon = DragonConfig[state.dragonId]
 	if not dragon then return end
 
-	-- SECURITY: derive `origin` from the player's actual server-side character
-	-- position, NOT from the client argument. A spoofed clientOrigin could:
-	--   - place hit-detection within 1 stud of any victim → always hits
-	--   - bypass distance falloff → full damage from across the map
-	-- We still ACCEPT clientOrigin as a hint (the client knows the breath
-	-- visual offset), but clamp it to within 8 studs of the actual character
-	-- position. That's enough to cover the legit "muzzle ahead of dragon"
-	-- offset (CombatInput uses ~5 studs) without trusting cheaters.
-	local character = player.Character
-	if not character or not character.PrimaryPart then return end
-	local serverPos = character.PrimaryPart.Position
-	local clientOriginVec = clientOrigin :: Vector3
-	local origin: Vector3
-	if (clientOriginVec - serverPos).Magnitude <= 8 then
-		origin = clientOriginVec
-	else
-		-- Cheater fallback: snap origin to character position. Their breath
-		-- still fires, but from where they actually are.
-		origin = serverPos
-	end
-
-	-- Direction validation: must be roughly unit-length. Reject Vector3.zero
-	-- (would crash :Unit normalization downstream) and absurd magnitudes.
-	local dirVec = direction :: Vector3
-	if dirVec.Magnitude < 0.01 or dirVec.Magnitude > 100 then return end
-
 	-- Fake projectile travel time. The client-side breath visual takes
 	-- distance/150 seconds to traverse to the target. Server applies damage
 	-- at hit-detection time (instant cone test, anti-cheat) but DELAYS the
@@ -207,22 +167,24 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, clientOrigin: un
 	local TRAVEL_CAP = 0.4 -- seconds; max delay even for very long shots
 
 	-- Try player target first
-	local hitPlayer = CombatManager.findHitPlayer(player, origin, dirVec)
+	local hitPlayer = CombatManager.findHitPlayer(player, origin :: Vector3, direction :: Vector3)
 	if hitPlayer then
 		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen (resolved at fire-time, fair)
 		-- Damage falloff: scale base damage by distance from breath origin.
 		-- Close-range = full damage, long-range (>=80 studs) = 50%.
 		local hitTargetPos = (hitPlayer.Character and hitPlayer.Character.PrimaryPart)
 			and hitPlayer.Character.PrimaryPart.Position
-			or origin
-		local hitDist = (hitTargetPos - origin).Magnitude
+			or origin :: Vector3
+		local hitDist = (hitTargetPos - origin :: Vector3).Magnitude
 		local falloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(hitDist))
 		local travelTime = math.min(hitDist / PROJECTILE_SPEED, TRAVEL_CAP)
 
 		-- Capture shooter position now (before delay) so the damage-direction
 		-- arc points at where the shooter was when they fired, not later.
-		-- serverPos was already computed above for the origin clamp; reuse it.
-		local shooterPos = serverPos
+		local shooterPos = origin :: Vector3
+		if player.Character and player.Character.PrimaryPart then
+			shooterPos = player.Character.PrimaryPart.Position
+		end
 
 		-- Delay damage application + remote fires by travel time. Hit was
 		-- locked-in above (predictive hit model — same as League/Overwatch
@@ -260,11 +222,11 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, clientOrigin: un
 	end
 
 	-- No player hit — check NPCs in the cone
-	local hitNpc = CombatManager.findHitNPC(NPCManager.getAlive(), origin, dirVec)
+	local hitNpc = CombatManager.findHitNPC(NPCManager.getAlive(), origin :: Vector3, direction :: Vector3)
 	if hitNpc then
 		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen (NPC kills count too)
 		-- Same falloff curve for NPCs — consistent skill expression.
-		local npcDist = (hitNpc.rootPart.Position - origin).Magnitude
+		local npcDist = (hitNpc.rootPart.Position - origin :: Vector3).Magnitude
 		local npcFalloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(npcDist))
 		local npcTravelTime = math.min(npcDist / PROJECTILE_SPEED, TRAVEL_CAP)
 
@@ -285,9 +247,6 @@ end)
 -- Client now passes camera direction (2nd arg) so cone specials aim where
 -- the player is looking, not where the body is tilted (climb/dive/bank).
 useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection: unknown)
-	-- Rate limit 2/sec; real cooldown is 10s. Generous on legit play, tight
-	-- on flood. canUseSpecial enforces the actual cooldown after this gate.
-	if not RateLimiter.check(player, "UseSpecial", 2) then return end
 	if not CombatManager.canUseSpecial(player) then return end
 	if not RoundManager.isActive() then return end
 

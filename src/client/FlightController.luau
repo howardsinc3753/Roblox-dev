@@ -17,11 +17,6 @@ local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
--- Gate ButtonA boost binding on menu state. ButtonA is also the "confirm
--- card" button in DragonSelectUI; without this gate, holding A to confirm
--- a dragon would also queue boost the moment the menu closes — player would
--- spawn into the new dragon already burning boost meter.
-local DragonSelectUI = require(script.Parent.DragonSelectUI)
 
 local FlightController = {}
 
@@ -137,13 +132,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 	-- Gamepad — Roblox auto-maps Xbox enums to PS5 buttons at runtime
 	if input.KeyCode == Enum.KeyCode.ButtonR1 then gamepadAscend = true end
 	if input.KeyCode == Enum.KeyCode.ButtonL1 then gamepadDescend = true end
-	-- ButtonA doubles as DragonSelectUI's confirm. Skip the boost binding
-	-- while the menu is open so confirming a card doesn't queue boost into
-	-- the next moment of flight. The InputEnded handler still clears the
-	-- flag normally on release — we just don't SET it during menu time.
-	if input.KeyCode == Enum.KeyCode.ButtonA and not DragonSelectUI.isOpen() then
-		gamepadBoost = true
-	end
+	if input.KeyCode == Enum.KeyCode.ButtonA then gamepadBoost = true end
 end)
 
 UserInputService.InputEnded:Connect(function(input: InputObject)

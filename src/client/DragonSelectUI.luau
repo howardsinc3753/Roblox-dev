@@ -304,14 +304,6 @@ function DragonSelectUI.show(intermissionSeconds: number?)
 		end
 		-- Free the mouse so players can click cards
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		-- Show the gamepad navigation cursor on EVERY open path (B-key,
-		-- intermission auto-show, Y-button). Previously the cursor only
-		-- appeared when opened via Y → controller users opening via B saw
-		-- no cursor until their first D-pad press. Late-bound lookup so
-		-- show() can predate the gamepad section's function definition.
-		if DragonSelectUI.resetGamepadCursor then
-			DragonSelectUI.resetGamepadCursor()
-		end
 	end
 end
 
@@ -382,23 +374,21 @@ local cursorIndex = 1
 local cursorStroke: UIStroke? = nil
 
 local function applyCursorVisual()
-	-- Find the card the cursor should land on. If it doesn't exist yet
-	-- (cards built lazily), park the stroke off-tree until it does.
+	-- Remove old highlight
+	if cursorStroke then
+		cursorStroke:Destroy()
+		cursorStroke = nil
+	end
+	-- Apply highlight to current cursor card
 	local dragonId = DRAGON_ORDER[cursorIndex]
 	local cardWrap = dragonCards[dragonId]
 	if not cardWrap then return end
-
-	-- Create the stroke once on first use; subsequent calls just REPARENT
-	-- it to the new card. Avoids the destroy/recreate churn that would
-	-- otherwise allocate + GC a UIStroke and trigger a layout pass on
-	-- every D-pad press (kids spam navigation).
-	if not cursorStroke then
-		cursorStroke = Instance.new("UIStroke")
-		(cursorStroke :: UIStroke).Name = "GamepadCursor"
-		(cursorStroke :: UIStroke).Color = Color3.fromRGB(120, 220, 255) -- distinct cyan vs equipped stroke
-		(cursorStroke :: UIStroke).Thickness = 5
-	end
-	(cursorStroke :: UIStroke).Parent = cardWrap.card
+	local stroke = Instance.new("UIStroke")
+	stroke.Name = "GamepadCursor"
+	stroke.Color = Color3.fromRGB(120, 220, 255) -- distinct cyan vs the equipped stroke
+	stroke.Thickness = 5
+	stroke.Parent = cardWrap.card
+	cursorStroke = stroke
 end
 
 local function moveCursor(dx: number, dy: number)
@@ -433,22 +423,15 @@ local function confirmCursorSelection()
 	end
 end
 
--- Public reset entry point. Called by DragonSelectUI.show() on every open
--- path (B-key, Y-button, intermission auto-open) so the gamepad cursor
--- becomes visible immediately rather than after the player's first D-pad
--- press. Defined here (not at module top) because it depends on the local
--- applyCursorVisual closure; show() looks it up late on the table.
-function DragonSelectUI.resetGamepadCursor()
-	cursorIndex = 1
-	applyCursorVisual()
-end
-
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	-- Y / Triangle: open menu mid-round (toggleable). Always responsive
-	-- regardless of menu state, like a pause button. Cursor reset is now
-	-- handled inside DragonSelectUI.show(), so we just toggle here.
+	-- regardless of menu state, like a pause button.
 	if input.KeyCode == Enum.KeyCode.ButtonY then
 		DragonSelectUI.toggle()
+		if DragonSelectUI.isOpen() then
+			cursorIndex = 1
+			applyCursorVisual()
+		end
 		return
 	end
 
