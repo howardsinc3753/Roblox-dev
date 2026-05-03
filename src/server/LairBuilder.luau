@@ -52,6 +52,10 @@ local function loadHeroPiece(assetId: number, targetCFrame: CFrame, scale: numbe
 	for _, descendant in cloned:GetDescendants() do
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = true
+			-- Lair pieces stay non-collidable — they're decorative and we
+			-- don't want kids snagging on the central pillar while orbiting
+			-- it for the upgrade station. Differs from Arena towers, which
+			-- ARE collidable so they work as cover.
 			descendant.CanCollide = false
 		end
 	end
@@ -138,8 +142,9 @@ end
 local function buildCentralPillar(parent: Instance)
 	local pillarBase = LAIR_CENTER + Vector3.new(0, FLOOR_THICKNESS / 2, 0)
 
-	-- Hero load attempt
-	local hero = loadHeroPiece(CRYSTAL_TOWER_ASSET, CFrame.new(pillarBase), 4)
+	-- Hero load attempt. Scale 1.5 — Meshy assets default sizes vary, tune
+	-- after seeing the result in playtest.
+	local hero = loadHeroPiece(CRYSTAL_TOWER_ASSET, CFrame.new(pillarBase), 1.5)
 	if hero then
 		hero.Name = "CentralCrystalTower"
 		hero.Parent = parent

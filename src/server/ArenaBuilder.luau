@@ -40,11 +40,11 @@ local function loadHeroPiece(assetId: number, targetCFrame: CFrame, scale: numbe
 	for _, descendant in cloned:GetDescendants() do
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = true
-			-- Towers are scenery — non-collidable so dragons can fly through
-			-- the lower body if needed (don't trap them at ground level).
-			-- Tops are still solid landmarks visually. Tune later if cover
-			-- behavior is desired.
-			descendant.CanCollide = false
+			-- Solid towers act as cover — dragons must dive AROUND or
+			-- OVER them, not through them. That's the whole point of
+			-- vertical structures in aerial combat. Initially had this
+			-- as false; user feedback was "I can fly through walls."
+			descendant.CanCollide = true
 		end
 	end
 	cloned.Parent = workspace
@@ -286,8 +286,10 @@ function ArenaBuilder.build()
 	-- gracefully degrade to the cylinder fallback (LoadAsset can fail in
 	-- Studio without the asset being permission-granted).
 	local towerPositions = {
-		{ pos = Vector3.new(150, 0, 0), height = 130, asset = TOWER_ASSET_GUARD, scale = 8 },
-		{ pos = Vector3.new(-160, 0, 80), height = 110, asset = TOWER_ASSET_WIZARD, scale = 8 },
+		-- Hero asset towers: scale 2 (originally 8 was way too large per QA).
+		-- Tweak this number if towers still appear oversized or too small.
+		{ pos = Vector3.new(150, 0, 0), height = 130, asset = TOWER_ASSET_GUARD, scale = 2 },
+		{ pos = Vector3.new(-160, 0, 80), height = 110, asset = TOWER_ASSET_WIZARD, scale = 2 },
 		{ pos = Vector3.new(80, 60, -180), height = 150, asset = nil },
 		{ pos = Vector3.new(-100, 40, -150), height = 120, asset = nil },
 		{ pos = Vector3.new(180, 80, 170), height = 100, asset = nil },
