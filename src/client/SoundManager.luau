@@ -48,14 +48,24 @@ function SoundManager.play(name: string)
 	end
 end
 
--- Background music: looped, plays continuously while client is alive.
--- Roblox audio library: 1837854434 is "Epic Battle" type loop. Tweak as desired.
-local BACKGROUND_MUSIC_ID = "rbxassetid://1837854434"
+-- Background music. Currently disabled because Roblox's 2022 audio privacy
+-- update means most public music asset IDs no longer play in your experience
+-- unless they're owned by you (uploaded via Open Cloud Audio API or in Studio).
+--
+-- TO ENABLE: Upload a music track to Roblox via:
+--   - Studio: View > Asset Manager > Audio > Upload (costs 100 Robux per track)
+--   - Open Cloud Assets API (we have the key set up — see scripts/upload-audio.luau)
+-- Then set BACKGROUND_MUSIC_ID below to your asset ID and remove the early return.
+local BACKGROUND_MUSIC_ID = "" -- empty = no music; set to "rbxassetid://YOUR_ID"
 local BACKGROUND_MUSIC_VOLUME = 0.25
 
 local backgroundMusic: Sound? = nil
 
 function SoundManager.startMusic()
+	if BACKGROUND_MUSIC_ID == "" then
+		warn("[SoundManager] Background music disabled — no asset ID set. See SoundManager.luau:51 for instructions.")
+		return
+	end
 	if backgroundMusic then return end
 	backgroundMusic = Instance.new("Sound")
 	backgroundMusic.Name = "BackgroundMusic"

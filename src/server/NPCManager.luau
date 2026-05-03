@@ -122,8 +122,10 @@ local function buildPlaceholderModel(enemy: any, enemyName: string): Model
 	body.Color = enemy.color
 	body.Material = Enum.Material.SmoothPlastic
 	body.Anchored = false
-	body.CanCollide = false -- no collision so they can phase past players (less stuck-on-each-other)
-	body.Massless = true
+	body.CanCollide = false -- phases through players; avoids the stuck-on-each-other dance
+	-- Body must NOT be massless. Roblox physics treats zero-mass assemblies as
+	-- immovable — LinearVelocity silently does nothing. (Wings/mesh parts stay
+	-- massless because they're welded to the body, which now has the assembly mass.)
 	body.Parent = model
 
 	-- Wing visuals — give the enemy *some* dragon-shape recognition
@@ -251,7 +253,8 @@ end
 
 function NPCManager.spawn(enemyType: string): NPCState?
 	if #NPCManager.getAlive() >= MAX_NPCS then
-		return nil -- server cap reached
+		print(`[NPCManager] At cap ({MAX_NPCS}), skipping spawn of {enemyType}`)
+		return nil
 	end
 
 	local enemy = EnemyConfig[enemyType]
@@ -267,6 +270,7 @@ function NPCManager.spawn(enemyType: string): NPCState?
 	local spawnPos = randomSpawnPosition()
 	model:PivotTo(CFrame.new(spawnPos))
 	model.Parent = workspace
+	print(`[NPCManager] Spawned {enemy.name} #{id} at {spawnPos}`)
 
 	-- Tag for client-side identification (e.g., enemy nameplate styling)
 	CollectionService:AddTag(model, "DragonWarz_NPC")
