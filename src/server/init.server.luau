@@ -158,10 +158,18 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	local dragon = DragonConfig[state.dragonId]
 	if not dragon then return end
 
+	-- Fake projectile travel time. The client-side breath visual takes
+	-- distance/150 seconds to traverse to the target. Server applies damage
+	-- at hit-detection time (instant cone test, anti-cheat) but DELAYS the
+	-- damage application so visual + HP drop arrive together. Cap at 0.4s
+	-- so very long shots don't feel laggy.
+	local PROJECTILE_SPEED = 150 -- studs/sec, must match CombatInput's tween speed
+	local TRAVEL_CAP = 0.4 -- seconds; max delay even for very long shots
+
 	-- Try player target first
 	local hitPlayer = CombatManager.findHitPlayer(player, origin :: Vector3, direction :: Vector3)
 	if hitPlayer then
-		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen
+		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen (resolved at fire-time, fair)
 		-- Damage falloff: scale base damage by distance from breath origin.
 		-- Close-range = full damage, long-range (>=80 studs) = 50%.
 		local hitTargetPos = (hitPlayer.Character and hitPlayer.Character.PrimaryPart)
@@ -169,38 +177,47 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 			or origin :: Vector3
 		local hitDist = (hitTargetPos - origin :: Vector3).Magnitude
 		local falloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(hitDist))
-		local killed, damage = CombatManager.applyDamage(hitPlayer, falloffDmg)
-		-- 3rd arg = source position, used by victim's client to render damage-direction arc.
-		-- Pass the shooter's character position (not the breath origin) since "the attacker"
-		-- is what the kid wants to know about, not where the attack started in space.
+		local travelTime = math.min(hitDist / PROJECTILE_SPEED, TRAVEL_CAP)
+
+		-- Capture shooter position now (before delay) so the damage-direction
+		-- arc points at where the shooter was when they fired, not later.
 		local shooterPos = origin :: Vector3
 		if player.Character and player.Character.PrimaryPart then
 			shooterPos = player.Character.PrimaryPart.Position
 		end
-		damagePlayerRemote:FireAllClients(hitPlayer.UserId, damage, shooterPos)
 
-		if killed then
-			RoundManager.recordKill(player, hitPlayer)
-			DataManager.addCoins(player, 10)
-			updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+		-- Delay damage application + remote fires by travel time. Hit was
+		-- locked-in above (predictive hit model — same as League/Overwatch
+		-- non-projectile abilities). If the victim disconnects or dies during
+		-- the brief travel, applyDamage's alive check no-ops gracefully.
+		task.delay(travelTime, function()
+			if not hitPlayer.Parent then return end -- left the server
+			local killed, damage = CombatManager.applyDamage(hitPlayer, falloffDmg)
+			damagePlayerRemote:FireAllClients(hitPlayer.UserId, damage, shooterPos)
 
-			local data = DataManager.getData(player)
-			if data then data.stats.totalKills += 1 end
-			local victimData = DataManager.getData(hitPlayer)
-			if victimData then victimData.stats.totalDeaths += 1 end
+			if killed then
+				RoundManager.recordKill(player, hitPlayer)
+				DataManager.addCoins(player, 10)
+				updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
 
-			playerKORemote:FireAllClients(player.UserId, hitPlayer.UserId)
-			updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
+				local data = DataManager.getData(player)
+				if data then data.stats.totalKills += 1 end
+				local victimData = DataManager.getData(hitPlayer)
+				if victimData then victimData.stats.totalDeaths += 1 end
 
-			task.delay(RESPAWN_TIME, function()
-				if hitPlayer and hitPlayer.Parent then
-					local vData = DataManager.getData(hitPlayer)
-					local vDragonId = if vData then vData.selectedDragon else "Ember"
-					CombatManager.respawn(hitPlayer)
-					DragonSpawner.spawn(hitPlayer, vDragonId)
-				end
-			end)
-		end
+				playerKORemote:FireAllClients(player.UserId, hitPlayer.UserId)
+				updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
+
+				task.delay(RESPAWN_TIME, function()
+					if hitPlayer and hitPlayer.Parent then
+						local vData = DataManager.getData(hitPlayer)
+						local vDragonId = if vData then vData.selectedDragon else "Ember"
+						CombatManager.respawn(hitPlayer)
+						DragonSpawner.spawn(hitPlayer, vDragonId)
+					end
+				end)
+			end
+		end)
 		return
 	end
 
@@ -211,11 +228,18 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 		-- Same falloff curve for NPCs — consistent skill expression.
 		local npcDist = (hitNpc.rootPart.Position - origin :: Vector3).Magnitude
 		local npcFalloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(npcDist))
-		NPCManager.applyDamage(hitNpc.id, npcFalloffDmg, player.UserId)
-		-- H1+H3 fix: send NPC model + damage to the SHOOTER ONLY. Client renders
-		-- the floating "-X" above the NPC and plays the hit sound. Other clients
-		-- don't get spammed with hit sounds for someone else's combat.
-		damageNPCRemote:FireClient(player, hitNpc.model, npcFalloffDmg)
+		local npcTravelTime = math.min(npcDist / PROJECTILE_SPEED, TRAVEL_CAP)
+
+		-- Same predictive-hit pattern as players. NPCManager.applyDamage
+		-- handles the "already dead during travel" case via its alive check.
+		task.delay(npcTravelTime, function()
+			if not hitNpc.model or not hitNpc.model.Parent then return end
+			NPCManager.applyDamage(hitNpc.id, npcFalloffDmg, player.UserId)
+			-- H1+H3 fix: send NPC model + damage to the SHOOTER ONLY. Client renders
+			-- the floating "-X" above the NPC and plays the hit sound. Other clients
+			-- don't get spammed with hit sounds for someone else's combat.
+			damageNPCRemote:FireClient(player, hitNpc.model, npcFalloffDmg)
+		end)
 	end
 end)
 
