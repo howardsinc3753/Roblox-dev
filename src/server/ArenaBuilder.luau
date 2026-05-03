@@ -11,6 +11,7 @@ local TOWER_ASSET_GUARD = 101559450428915 -- guard tower
 local TOWER_ASSET_WIZARD = 5408278132 -- wizard tower
 local SKY_ATMOSPHERE_ASSET = 4607457995 -- Atmosphere/Sky preset, parented to Lighting
 local GRASS_BASE_ASSET = 12132147781 -- big grass platform, placed far below for ground feel
+local SKY_CASTLE_ASSET = 108721507426018 -- floating castle, replaces placeholder block+spires at arena center
 
 -- Loads a Roblox Model asset, scales + positions it, anchors all parts,
 -- and parents it into Workspace. Returns the cloned model or nil on
@@ -407,39 +408,45 @@ function ArenaBuilder.build()
 		grassBase.Name = "WorldGroundGrass"
 	end
 
-	-- Sky Castle placeholder: large stone block at arena center, raised
-	-- to ~120 studs altitude. Sprint 7 swaps for a Meshy hero piece
-	-- ("ancient floating sky castle ruins"). For now it's a recognizable
-	-- landmark + atmospheric centerpiece + reserved space for future
-	-- boss arena content.
-	local castleBase = Instance.new("Part")
-	castleBase.Name = "SkyCastlePlaceholder"
-	castleBase.Size = Vector3.new(60, 40, 60)
-	castleBase.CFrame = CFrame.new(0, 130, 0)
-	castleBase.Color = Color3.fromRGB(100, 90, 110)
-	castleBase.Material = Enum.Material.Slate
-	castleBase.Anchored = true
-	castleBase.CanCollide = true
-	castleBase.Parent = game.Workspace
+	-- Sky Castle: try the user-supplied hero asset first; fall back to a
+	-- programmatic block-and-spires placeholder if the asset fails to load.
+	local castleHero = loadHeroPiece(
+		SKY_CASTLE_ASSET,
+		CFrame.new(0, 130, 0),
+		10 -- scale; tune if asset is too small/large
+	)
+	if castleHero then
+		castleHero.Name = "SkyCastleHero"
+	else
+		-- Fallback placeholder block + 4 spires (original Sprint 5 Part B
+		-- programmatic stand-in)
+		local castleBase = Instance.new("Part")
+		castleBase.Name = "SkyCastlePlaceholder"
+		castleBase.Size = Vector3.new(60, 40, 60)
+		castleBase.CFrame = CFrame.new(0, 130, 0)
+		castleBase.Color = Color3.fromRGB(100, 90, 110)
+		castleBase.Material = Enum.Material.Slate
+		castleBase.Anchored = true
+		castleBase.CanCollide = true
+		castleBase.Parent = game.Workspace
 
-	-- Spires on top of the castle (4 corner cylinders) — reads as "castle"
-	-- even without the Meshy hero piece, gives a clear landmark
-	for i = 0, 3 do
-		local angle = math.rad(45 + i * 90)
-		local spire = Instance.new("Part")
-		spire.Name = `SkyCastle_Spire_{i + 1}`
-		spire.Shape = Enum.PartType.Cylinder
-		spire.Size = Vector3.new(30, 6, 6)
-		spire.CFrame = CFrame.new(
-			math.cos(angle) * 22,
-			130 + 35,
-			math.sin(angle) * 22
-		) * CFrame.Angles(0, 0, math.rad(90))
-		spire.Color = Color3.fromRGB(120, 110, 130)
-		spire.Material = Enum.Material.Slate
-		spire.Anchored = true
-		spire.CanCollide = false
-		spire.Parent = game.Workspace
+		for i = 0, 3 do
+			local angle = math.rad(45 + i * 90)
+			local spire = Instance.new("Part")
+			spire.Name = `SkyCastle_Spire_{i + 1}`
+			spire.Shape = Enum.PartType.Cylinder
+			spire.Size = Vector3.new(30, 6, 6)
+			spire.CFrame = CFrame.new(
+				math.cos(angle) * 22,
+				130 + 35,
+				math.sin(angle) * 22
+			) * CFrame.Angles(0, 0, math.rad(90))
+			spire.Color = Color3.fromRGB(120, 110, 130)
+			spire.Material = Enum.Material.Slate
+			spire.Anchored = true
+			spire.CanCollide = false
+			spire.Parent = game.Workspace
+		end
 	end
 
 	-- Glowing crystal at the very top of the castle — visible from anywhere
