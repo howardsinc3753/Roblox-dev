@@ -18,20 +18,16 @@ local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("Drag
 local ArenaBuilder = require(script.ArenaBuilder)
 local NPCManager = require(script.NPCManager)
 local RateLimiter = require(script.RateLimiter)
--- Sprint 5 Part A re-enable. The HUD.luau syntax error (commit fcc9f57) was
--- the actual cause of the earlier "game broken" state, not LairBuilder.
--- Pcall wrap kept around build() per CODE_MAP.md safe-add pattern: ship with
--- the safety net, verify Output prints success, then remove pcall in a
--- follow-up commit once Lair is confirmed stable.
 local LairBuilder = require(script.LairBuilder)
 
 print("[Server] Dragon Warz server starting...")
 
+-- Build the arena (combat zone) and lair (safe hub) at server start.
+-- Both static, so no per-player cost. Sprint 5 Part C adds zone detection
+-- (which players are in which area), Part D wires combat to respect the
+-- Lair as a safe space, Part E adds the portal teleport between them.
 ArenaBuilder.build()
-local lairOk, lairErr = pcall(LairBuilder.build)
-if not lairOk then
-	warn(`[Server] LairBuilder.build failed: {lairErr}`)
-end
+LairBuilder.build()
 
 -- Helper to get a remote
 local function getRemote(name: string): RemoteEvent

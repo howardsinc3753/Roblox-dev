@@ -225,7 +225,134 @@ function ArenaBuilder.build()
 	killZone.CanCollide = false
 	killZone.Parent = game.Workspace
 
-	print("[ArenaBuilder] Arena built!")
+	-- ============================================================
+	-- Sprint 5 Part B: Sky Kingdom upgrade
+	-- Tall structures + cloud platforms + central placeholder give
+	-- the arena verticality + cover for aerial dogfights. Without
+	-- these, players just zoom in open sky with nothing to dive
+	-- around, hide behind, or use as a landmark.
+	-- ============================================================
+
+	-- Sky Towers: 5 tall cylinders at varied positions + heights.
+	-- Provide vertical cover — fly behind one to break line-of-sight,
+	-- circle around the top for an attack run, etc. Each tower has
+	-- an emissive crown so it doubles as a navigation landmark.
+	local towerPositions = {
+		{ pos = Vector3.new(150, 50, 0), height = 130 },
+		{ pos = Vector3.new(-160, 30, 80), height = 110 },
+		{ pos = Vector3.new(80, 60, -180), height = 150 },
+		{ pos = Vector3.new(-100, 40, -150), height = 120 },
+		{ pos = Vector3.new(180, 80, 170), height = 100 },
+	}
+	for i, tower in towerPositions do
+		local body = Instance.new("Part")
+		body.Name = `SkyTower_{i}_Body`
+		body.Shape = Enum.PartType.Cylinder
+		body.Size = Vector3.new(tower.height, 22, 22)
+		body.CFrame = CFrame.new(tower.pos + Vector3.new(0, tower.height / 2, 0))
+			* CFrame.Angles(0, 0, math.rad(90))
+		body.Color = Color3.fromRGB(80, 75, 90)
+		body.Material = Enum.Material.Slate
+		body.Anchored = true
+		body.CanCollide = true
+		body.Parent = game.Workspace
+
+		-- Emissive crown ring at the top — landmark in flight
+		local crown = Instance.new("Part")
+		crown.Name = `SkyTower_{i}_Crown`
+		crown.Shape = Enum.PartType.Cylinder
+		crown.Size = Vector3.new(3, 28, 28)
+		crown.CFrame = CFrame.new(tower.pos + Vector3.new(0, tower.height + 1, 0))
+			* CFrame.Angles(0, 0, math.rad(90))
+		crown.Color = Color3.fromRGB(255, 200, 80)
+		crown.Material = Enum.Material.Neon
+		crown.Transparency = 0.2
+		crown.Anchored = true
+		crown.CanCollide = false
+		crown.Parent = game.Workspace
+	end
+
+	-- Cloud Platforms: 10 flat disc Parts at mid-altitudes scattered
+	-- around the arena. Mid-altitude perches for resting + breaking
+	-- off the chase. CanCollide so dragons can land on them.
+	local cloudCount = 10
+	for i = 1, cloudCount do
+		local angle = (i - 1) * math.pi * 2 / cloudCount + math.random() * 0.4
+		local radius = 60 + math.random(0, 100)
+		local height = 60 + math.random(0, 80)
+		local cloud = Instance.new("Part")
+		cloud.Name = `CloudPlatform_{i}`
+		cloud.Shape = Enum.PartType.Cylinder
+		cloud.Size = Vector3.new(2, 24 + math.random(0, 12), 24 + math.random(0, 12))
+		cloud.CFrame = CFrame.new(
+			math.cos(angle) * radius,
+			height,
+			math.sin(angle) * radius
+		) * CFrame.Angles(0, 0, math.rad(90))
+		cloud.Color = Color3.fromRGB(240, 245, 255)
+		cloud.Material = Enum.Material.SmoothPlastic
+		cloud.Transparency = 0.15
+		cloud.Anchored = true
+		cloud.CanCollide = true
+		cloud.Parent = game.Workspace
+	end
+
+	-- Sky Castle placeholder: large stone block at arena center, raised
+	-- to ~120 studs altitude. Sprint 7 swaps for a Meshy hero piece
+	-- ("ancient floating sky castle ruins"). For now it's a recognizable
+	-- landmark + atmospheric centerpiece + reserved space for future
+	-- boss arena content.
+	local castleBase = Instance.new("Part")
+	castleBase.Name = "SkyCastlePlaceholder"
+	castleBase.Size = Vector3.new(60, 40, 60)
+	castleBase.CFrame = CFrame.new(0, 130, 0)
+	castleBase.Color = Color3.fromRGB(100, 90, 110)
+	castleBase.Material = Enum.Material.Slate
+	castleBase.Anchored = true
+	castleBase.CanCollide = true
+	castleBase.Parent = game.Workspace
+
+	-- Spires on top of the castle (4 corner cylinders) — reads as "castle"
+	-- even without the Meshy hero piece, gives a clear landmark
+	for i = 0, 3 do
+		local angle = math.rad(45 + i * 90)
+		local spire = Instance.new("Part")
+		spire.Name = `SkyCastle_Spire_{i + 1}`
+		spire.Shape = Enum.PartType.Cylinder
+		spire.Size = Vector3.new(30, 6, 6)
+		spire.CFrame = CFrame.new(
+			math.cos(angle) * 22,
+			130 + 35,
+			math.sin(angle) * 22
+		) * CFrame.Angles(0, 0, math.rad(90))
+		spire.Color = Color3.fromRGB(120, 110, 130)
+		spire.Material = Enum.Material.Slate
+		spire.Anchored = true
+		spire.CanCollide = false
+		spire.Parent = game.Workspace
+	end
+
+	-- Glowing crystal at the very top of the castle — visible from anywhere
+	-- in the arena, doubles as the "look here" landmark for new players
+	local castleCrystal = Instance.new("Part")
+	castleCrystal.Name = "SkyCastle_Crystal"
+	castleCrystal.Shape = Enum.PartType.Block
+	castleCrystal.Size = Vector3.new(8, 18, 8)
+	castleCrystal.CFrame = CFrame.new(0, 175, 0) * CFrame.Angles(0, math.rad(45), 0)
+	castleCrystal.Color = Color3.fromRGB(180, 220, 255)
+	castleCrystal.Material = Enum.Material.Neon
+	castleCrystal.Transparency = 0.1
+	castleCrystal.Anchored = true
+	castleCrystal.CanCollide = false
+	castleCrystal.Parent = game.Workspace
+
+	local crystalLight = Instance.new("PointLight")
+	crystalLight.Color = Color3.fromRGB(180, 220, 255)
+	crystalLight.Brightness = 6
+	crystalLight.Range = 80
+	crystalLight.Parent = castleCrystal
+
+	print("[ArenaBuilder] Arena built! (Sky Kingdom: 5 towers, 10 clouds, central castle)")
 end
 
 return ArenaBuilder
