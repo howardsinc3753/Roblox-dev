@@ -63,6 +63,11 @@ Players.PlayerAdded:Connect(function(player: Player)
 
 	-- Load persistent data
 	local data = DataManager.loadPlayer(player)
+	-- Process daily login: streak update + bonus coins + populate welcomeBonus.
+	-- Must run BEFORE the initial UpdateCoins fire so the client sees the new
+	-- balance (with the bonus applied). The welcomeBonus payload reaches the
+	-- client via the existing GetPlayerData refresh — no new remote needed.
+	DataManager.processLogin(player)
 	RoundManager.initPlayerScore(player)
 
 	-- Spawn their dragon
@@ -70,7 +75,7 @@ Players.PlayerAdded:Connect(function(player: Player)
 	CombatManager.initPlayer(player, dragonId)
 	DragonSpawner.spawn(player, dragonId)
 
-	-- Send initial data to client
+	-- Send initial data to client (coins now include the daily bonus)
 	updateCoinsRemote:FireClient(player, data.coins)
 	spawnDragonRemote:FireClient(player, dragonId)
 end)
@@ -157,7 +162,14 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	local hitPlayer = CombatManager.findHitPlayer(player, origin :: Vector3, direction :: Vector3)
 	if hitPlayer then
 		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen
-		local killed, damage = CombatManager.applyDamage(hitPlayer, dragon.damage)
+		-- Damage falloff: scale base damage by distance from breath origin.
+		-- Close-range = full damage, long-range (>=80 studs) = 50%.
+		local hitTargetPos = (hitPlayer.Character and hitPlayer.Character.PrimaryPart)
+			and hitPlayer.Character.PrimaryPart.Position
+			or origin :: Vector3
+		local hitDist = (hitTargetPos - origin :: Vector3).Magnitude
+		local falloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(hitDist))
+		local killed, damage = CombatManager.applyDamage(hitPlayer, falloffDmg)
 		-- 3rd arg = source position, used by victim's client to render damage-direction arc.
 		-- Pass the shooter's character position (not the breath origin) since "the attacker"
 		-- is what the kid wants to know about, not where the attack started in space.
@@ -196,12 +208,14 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	local hitNpc = CombatManager.findHitNPC(NPCManager.getAlive(), origin :: Vector3, direction :: Vector3)
 	if hitNpc then
 		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen (NPC kills count too)
-		-- applyDamage handles coin reward via the kill callback registered below
-		NPCManager.applyDamage(hitNpc.id, dragon.damage, player.UserId)
+		-- Same falloff curve for NPCs — consistent skill expression.
+		local npcDist = (hitNpc.rootPart.Position - origin :: Vector3).Magnitude
+		local npcFalloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(npcDist))
+		NPCManager.applyDamage(hitNpc.id, npcFalloffDmg, player.UserId)
 		-- H1+H3 fix: send NPC model + damage to the SHOOTER ONLY. Client renders
-		-- the floating "-15" above the NPC and plays the hit sound. Other clients
+		-- the floating "-X" above the NPC and plays the hit sound. Other clients
 		-- don't get spammed with hit sounds for someone else's combat.
-		damageNPCRemote:FireClient(player, hitNpc.model, dragon.damage)
+		damageNPCRemote:FireClient(player, hitNpc.model, npcFalloffDmg)
 	end
 end)
 
@@ -389,23 +403,31 @@ RoundManager.setCallbacks(
 		updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
 	end,
 
-	-- onRoundEnd: award participation + win bonus, fire RoundEnd with per-player
-	-- coins-earned data so the client can show a "you earned X coins" summary.
+	-- onRoundEnd: award participation + win bonus + first-win-of-day bonus.
+	-- Fire RoundEnd with per-player coins-earned data so the client can show
+	-- a "you earned X coins" summary. firstWinClaimed[userId] tells the client
+	-- whether to render the gold "FIRST WIN TODAY +50" highlight.
 	function()
 		local winner = RoundManager.getWinner()
 		local scoreboard = RoundManager.getScoreboard()
 		local PARTICIPATION = 5
 		local WIN_BONUS = 25
 
-		-- coinsEarnedThisRound: per-userId payout for the summary screen.
-		-- Kills are already paid in real time as they happen, so this only
-		-- includes the end-of-round bonuses (participation + winner).
 		local coinsEarnedThisRound: { [number]: number } = {}
+		local firstWinClaimed: { [number]: boolean } = {}
 
 		for _, player in Players:GetPlayers() do
 			local earned = PARTICIPATION
 			if winner and winner.UserId == player.UserId then
 				earned += WIN_BONUS
+				-- Stack the first-win-of-day bonus on top of the regular win bonus.
+				-- claimFirstWin is idempotent per UTC day (returns false if already
+				-- claimed today), so this only fires once per day per player.
+				local claimed, bonus = DataManager.claimFirstWin(player)
+				if claimed then
+					earned += bonus
+					firstWinClaimed[player.UserId] = true
+				end
 			end
 			DataManager.addCoins(player, earned)
 			coinsEarnedThisRound[player.UserId] = earned
@@ -415,7 +437,8 @@ RoundManager.setCallbacks(
 		roundEndRemote:FireAllClients(
 			if winner then winner.UserId else 0,
 			scoreboard,
-			coinsEarnedThisRound
+			coinsEarnedThisRound,
+			firstWinClaimed
 		)
 	end
 )

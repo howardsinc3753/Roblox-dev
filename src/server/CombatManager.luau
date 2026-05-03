@@ -32,6 +32,21 @@ local REGEN_DELAY = 3.0 -- seconds of no combat activity before regen starts
 local REGEN_RATE = 5 -- HP per second when regen is active
 local REGEN_TICK = 1.0 -- how often the regen loop applies a tick
 
+-- Damage falloff: full damage at close range, half at long range, linear
+-- in between. Rewards aggressive close-range play and stops one dragon
+-- from dominating the arena via long-distance breath sniping.
+local FALLOFF_NEAR = 30 -- studs; full damage within this
+local FALLOFF_FAR = 80 -- studs; minimum damage at this and beyond
+local FALLOFF_MIN = 0.5 -- multiplier at FALLOFF_FAR (50% of base damage)
+
+-- Returns a multiplier in [FALLOFF_MIN, 1] based on distance. Linear ramp.
+function CombatManager.distanceFalloff(distance: number): number
+	if distance <= FALLOFF_NEAR then return 1 end
+	if distance >= FALLOFF_FAR then return FALLOFF_MIN end
+	local t = (distance - FALLOFF_NEAR) / (FALLOFF_FAR - FALLOFF_NEAR)
+	return 1 - (1 - FALLOFF_MIN) * t
+end
+
 -- Sync CombatState health to the Humanoid on the character model
 local function syncHealthToHumanoid(player: Player, state: CombatState)
 	local character = player.Character
