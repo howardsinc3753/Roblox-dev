@@ -139,8 +139,16 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	-- Try player target first
 	local hitPlayer = CombatManager.findHitPlayer(player, origin :: Vector3, direction :: Vector3)
 	if hitPlayer then
+		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen
 		local killed, damage = CombatManager.applyDamage(hitPlayer, dragon.damage)
-		damagePlayerRemote:FireAllClients(hitPlayer.UserId, damage)
+		-- 3rd arg = source position, used by victim's client to render damage-direction arc.
+		-- Pass the shooter's character position (not the breath origin) since "the attacker"
+		-- is what the kid wants to know about, not where the attack started in space.
+		local shooterPos = origin :: Vector3
+		if player.Character and player.Character.PrimaryPart then
+			shooterPos = player.Character.PrimaryPart.Position
+		end
+		damagePlayerRemote:FireAllClients(hitPlayer.UserId, damage, shooterPos)
 
 		if killed then
 			RoundManager.recordKill(player, hitPlayer)
@@ -170,6 +178,7 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	-- No player hit — check NPCs in the cone
 	local hitNpc = CombatManager.findHitNPC(NPCManager.getAlive(), origin :: Vector3, direction :: Vector3)
 	if hitNpc then
+		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen (NPC kills count too)
 		-- applyDamage handles coin reward via the kill callback registered below
 		NPCManager.applyDamage(hitNpc.id, dragon.damage, player.UserId)
 		-- H1+H3 fix: send NPC model + damage to the SHOOTER ONLY. Client renders
@@ -361,6 +370,9 @@ RoundManager.startLoop()
 -- Start auto-save loop
 DataManager.startAutoSave()
 
+-- Start HP regen loop (heals players who haven't taken/dealt damage for 3s)
+CombatManager.startRegenLoop()
+
 -- ================================
 -- NPC SURVIVAL SYSTEM
 -- ================================
@@ -398,7 +410,9 @@ local function npcDamagePlayer(target: Player, damage: number, source: Vector3, 
 	end
 
 	local killed, actualDamage = CombatManager.applyDamage(target, damage)
-	damagePlayerRemote:FireAllClients(target.UserId, actualDamage)
+	-- 3rd arg = source position, for the damage-direction indicator on the victim's client.
+	-- `source` is the NPC's position (passed in by NPCManager AI tick).
+	damagePlayerRemote:FireAllClients(target.UserId, actualDamage, source)
 
 	if killed then
 		local victimData = DataManager.getData(target)

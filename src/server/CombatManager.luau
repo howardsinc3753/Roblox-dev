@@ -17,12 +17,20 @@ export type CombatState = {
 	alive: boolean,
 	lastBreathTime: number,
 	lastSpecialTime: number,
+	lastDamageTime: number, -- updated on damage taken OR dealt; gates HP regen
 }
 
 local playerStates: { [number]: CombatState } = {}
 local BREATH_COOLDOWN = 0.5
 local SPECIAL_COOLDOWN = 10.0
 local BREATH_RANGE = 100 -- studs
+
+-- HP regen out of combat. Discourages kamikaze respawn loops and gives
+-- defensive players a reason to disengage and reposition instead of
+-- always charging in.
+local REGEN_DELAY = 3.0 -- seconds of no combat activity before regen starts
+local REGEN_RATE = 5 -- HP per second when regen is active
+local REGEN_TICK = 1.0 -- how often the regen loop applies a tick
 
 -- Sync CombatState health to the Humanoid on the character model
 local function syncHealthToHumanoid(player: Player, state: CombatState)
@@ -48,6 +56,7 @@ function CombatManager.initPlayer(player: Player, dragonId: string)
 		alive = true,
 		lastBreathTime = 0,
 		lastSpecialTime = 0,
+		lastDamageTime = 0,
 	}
 	playerStates[player.UserId] = state
 	syncHealthToHumanoid(player, state)
@@ -99,6 +108,7 @@ function CombatManager.applyDamage(target: Player, damage: number): (boolean, nu
 	end
 
 	state.health = math.max(0, state.health - damage)
+	state.lastDamageTime = tick() -- victim is "in combat" — pauses their regen
 	syncHealthToHumanoid(target, state)
 
 	if state.health <= 0 then
@@ -109,6 +119,16 @@ function CombatManager.applyDamage(target: Player, damage: number): (boolean, nu
 	return false, damage
 end
 
+-- Mark a player as having dealt damage. Called from init.server.luau after a
+-- successful hit so the attacker's HP regen also pauses (otherwise an aggressor
+-- who lands hits but takes none could heal mid-fight).
+function CombatManager.recordDamageDealt(player: Player)
+	local state = playerStates[player.UserId]
+	if state then
+		state.lastDamageTime = tick()
+	end
+end
+
 function CombatManager.respawn(player: Player)
 	local state = playerStates[player.UserId]
 	if state then
@@ -117,9 +137,33 @@ function CombatManager.respawn(player: Player)
 			state.health = dragon.health
 			state.maxHealth = dragon.health
 			state.alive = true
+			state.lastDamageTime = 0 -- fresh respawn, regen ready immediately if hurt
 			syncHealthToHumanoid(player, state)
 		end
 	end
+end
+
+-- Periodic HP regen. Players who haven't taken or dealt damage for REGEN_DELAY
+-- seconds heal REGEN_RATE HP per second, capped at maxHealth.
+function CombatManager.startRegenLoop()
+	task.spawn(function()
+		while true do
+			task.wait(REGEN_TICK)
+			local now = tick()
+			for userId, state in playerStates do
+				if state.alive and state.health < state.maxHealth then
+					if (now - state.lastDamageTime) >= REGEN_DELAY then
+						local heal = REGEN_RATE * REGEN_TICK
+						state.health = math.min(state.maxHealth, state.health + heal)
+						local player = Players:GetPlayerByUserId(userId)
+						if player then
+							syncHealthToHumanoid(player, state)
+						end
+					end
+				end
+			end
+		end
+	end)
 end
 
 function CombatManager.healPlayer(player: Player, amount: number)
