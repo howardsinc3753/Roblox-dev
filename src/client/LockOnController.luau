@@ -45,10 +45,8 @@ local lastReportedUserId = 0
 local LOCK_RANGE = 300 -- studs; covers full arena (NPCs spawn at radius 250)
 local LOCK_CONE_DOT = 0.5 -- ~60 deg half-angle = 120 deg cone
 local NPC_TAG = "DragonWarz_NPC"
-local RETICLE_COLOR = Color3.fromRGB(255, 80, 80)
-local RETICLE_SIZE_PIXELS = 120
-local RETICLE_BRACKET_SIZE = 22
-local RETICLE_BRACKET_THICKNESS = 3
+local RETICLE_FILL_COLOR = Color3.fromRGB(255, 80, 80)
+local RETICLE_OUTLINE_COLOR = Color3.fromRGB(255, 220, 80)
 
 export type LockTarget = {
 	kind: string, -- "player" | "npc"
@@ -58,42 +56,51 @@ export type LockTarget = {
 }
 
 local currentTarget: LockTarget? = nil
-local reticleGui: BillboardGui? = nil
+-- Lock visual = Highlight (bright outline around target's whole model) +
+-- BillboardGui (small "TARGET" label above target). Highlight is Roblox's
+-- newer primitive specifically for "this thing is selected/highlighted" —
+-- much more visible than corner-bracket BillboardGuis at distance.
+local highlight: Highlight? = nil
+local labelGui: BillboardGui? = nil
 
--- Build the bracket-style reticle once. Reused by re-pointing its Adornee.
--- Four L-brackets at the corners of a square, classic lock-on style. Cheap
--- to render (8 frames) and reads instantly as "this thing is targeted".
+-- Build the lock visual once. Two pieces:
+--   1. Highlight — Roblox's "this whole model is selected" outline. Visible
+--      from any angle/distance, doesn't need to be sized in studs/pixels.
+--   2. BillboardGui label "▼ TARGET" hovering above the target. Small,
+--      sized in pixels (Offset on BillboardGui *children* IS pixels even
+--      though the BillboardGui itself sizes in studs).
 local function ensureReticle()
-	if reticleGui then return end
-	reticleGui = Instance.new("BillboardGui")
-	reticleGui.Name = "LockOnReticle"
-	reticleGui.Size = UDim2.fromOffset(RETICLE_SIZE_PIXELS, RETICLE_SIZE_PIXELS)
-	reticleGui.AlwaysOnTop = true
-	reticleGui.Enabled = false
-	reticleGui.Parent = playerGui
+	if highlight and labelGui then return end
 
-	local function makeBracketStroke(width: number, height: number, posX: UDim, posY: UDim)
-		local frame = Instance.new("Frame")
-		frame.Size = UDim2.fromOffset(width, height)
-		frame.Position = UDim2.new(posX.Scale, posX.Offset, posY.Scale, posY.Offset)
-		frame.BackgroundColor3 = RETICLE_COLOR
-		frame.BorderSizePixel = 0
-		frame.Parent = reticleGui
-	end
+	highlight = Instance.new("Highlight")
+	highlight.Name = "LockOnHighlight"
+	highlight.FillColor = RETICLE_FILL_COLOR
+	highlight.OutlineColor = RETICLE_OUTLINE_COLOR
+	highlight.FillTransparency = 0.6 -- partial fill so the dragon mesh stays visible
+	highlight.OutlineTransparency = 0 -- solid outline = unmistakable
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop -- visible through walls
+	highlight.Enabled = false
+	highlight.Parent = playerGui
 
-	-- Each corner = one horizontal stroke + one vertical stroke
-	-- Top-left
-	makeBracketStroke(RETICLE_BRACKET_SIZE, RETICLE_BRACKET_THICKNESS, UDim.new(0, 0), UDim.new(0, 0))
-	makeBracketStroke(RETICLE_BRACKET_THICKNESS, RETICLE_BRACKET_SIZE, UDim.new(0, 0), UDim.new(0, 0))
-	-- Top-right
-	makeBracketStroke(RETICLE_BRACKET_SIZE, RETICLE_BRACKET_THICKNESS, UDim.new(1, -RETICLE_BRACKET_SIZE), UDim.new(0, 0))
-	makeBracketStroke(RETICLE_BRACKET_THICKNESS, RETICLE_BRACKET_SIZE, UDim.new(1, -RETICLE_BRACKET_THICKNESS), UDim.new(0, 0))
-	-- Bottom-left
-	makeBracketStroke(RETICLE_BRACKET_SIZE, RETICLE_BRACKET_THICKNESS, UDim.new(0, 0), UDim.new(1, -RETICLE_BRACKET_THICKNESS))
-	makeBracketStroke(RETICLE_BRACKET_THICKNESS, RETICLE_BRACKET_SIZE, UDim.new(0, 0), UDim.new(1, -RETICLE_BRACKET_SIZE))
-	-- Bottom-right
-	makeBracketStroke(RETICLE_BRACKET_SIZE, RETICLE_BRACKET_THICKNESS, UDim.new(1, -RETICLE_BRACKET_SIZE), UDim.new(1, -RETICLE_BRACKET_THICKNESS))
-	makeBracketStroke(RETICLE_BRACKET_THICKNESS, RETICLE_BRACKET_SIZE, UDim.new(1, -RETICLE_BRACKET_THICKNESS), UDim.new(1, -RETICLE_BRACKET_SIZE))
+	labelGui = Instance.new("BillboardGui")
+	labelGui.Name = "LockOnLabel"
+	labelGui.Size = UDim2.fromOffset(150, 40) -- 150x40 STUDS in 3D — Roblox auto-scales by distance
+	labelGui.StudsOffset = Vector3.new(0, 8, 0) -- float above the target
+	labelGui.AlwaysOnTop = true
+	labelGui.LightInfluence = 0
+	labelGui.Enabled = false
+	labelGui.Parent = playerGui
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "▼ LOCKED ▼"
+	label.TextColor3 = RETICLE_FILL_COLOR
+	label.TextStrokeTransparency = 0
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.Parent = labelGui
 end
 
 -- Tell server about lock state change. Server forwards a LockedByEnemy
@@ -110,18 +117,26 @@ end
 
 local function clearLock()
 	currentTarget = nil
-	if reticleGui then
-		reticleGui.Enabled = false
-		reticleGui.Adornee = nil
+	if highlight then
+		highlight.Enabled = false
+		highlight.Adornee = nil
+	end
+	if labelGui then
+		labelGui.Enabled = false
+		labelGui.Adornee = nil
 	end
 	reportLockToServer(0)
 end
 
 local function setLock(target: LockTarget)
 	currentTarget = target
-	if reticleGui then
-		reticleGui.Adornee = target.rootPart
-		reticleGui.Enabled = true
+	if highlight then
+		highlight.Adornee = target.model -- Highlight wraps the whole model, not just rootPart
+		highlight.Enabled = true
+	end
+	if labelGui then
+		labelGui.Adornee = target.rootPart
+		labelGui.Enabled = true
 	end
 	-- Only player locks generate cross-client warnings (NPCs can't be alerted)
 	if target.kind == "player" and target.userId then
