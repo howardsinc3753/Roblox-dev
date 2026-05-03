@@ -74,6 +74,8 @@ local Dragons: { [string]: DragonStats } = {
 		color = Color3.fromRGB(139, 119, 80),
 		secondaryColor = Color3.fromRGB(80, 160, 60),
 		cost = 150,
+		meshAssetId = 133112860627881, -- Meshy earth/terra dragon
+		meshScale = 4,
 	},
 	Shadow = {
 		name = "Shadow",
