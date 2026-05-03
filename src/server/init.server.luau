@@ -208,8 +208,9 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 		-- Fireball Burst: AoE damage around the player
 		local nearby = CombatManager.findPlayersInRadius(pos, 40, player)
 		for _, target in nearby do
+			CombatManager.recordDamageDealt(player) -- pause caster's HP regen
 			local killed, _ = CombatManager.applyDamage(target, dragon.damage * 2)
-			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage * 2)
+			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage * 2, pos)
 			if killed then
 				RoundManager.recordKill(player, target)
 				DataManager.addCoins(player, 10)
@@ -238,8 +239,9 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 		for _, target in nearby do
 			if hitCount >= 3 then break end
 			hitCount += 1
+			CombatManager.recordDamageDealt(player) -- pause caster's HP regen
 			local killed, _ = CombatManager.applyDamage(target, dragon.damage)
-			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage)
+			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage, pos)
 			if killed then
 				RoundManager.recordKill(player, target)
 				DataManager.addCoins(player, 10)
