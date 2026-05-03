@@ -77,6 +77,7 @@ local syncTimerRemote = remotes:WaitForChild("SyncTimer") :: RemoteEvent
 local specialEffectRemote = remotes:WaitForChild("SpecialEffect") :: RemoteEvent
 local damageNPCRemote = remotes:WaitForChild("DamageNPC") :: RemoteEvent
 local npcBreathFiredRemote = remotes:WaitForChild("NPCBreathFired") :: RemoteEvent
+local lockedByEnemyRemote = remotes:WaitForChild("LockedByEnemy") :: RemoteEvent
 
 -- Dragon spawned/changed
 spawnDragonRemote.OnClientEvent:Connect(function(dragonId: string)
@@ -210,6 +211,83 @@ npcBreathFiredRemote.OnClientEvent:Connect(function(npcModel: Model, targetPos: 
 		projectile:Destroy()
 	end)
 end)
+
+-- Lock-on warning: another player has locked onto YOU. Brief red border
+-- pulse + tick sound so you know to break LOS or dodge before they fire.
+-- Doesn't pause the game or block anything — purely informational.
+do
+	local playerGuiRef = player:WaitForChild("PlayerGui") :: PlayerGui
+	local warningGui: ScreenGui? = nil
+	local warningCoroutine: thread? = nil
+
+	local function ensureWarningGui()
+		if warningGui then return end
+		warningGui = Instance.new("ScreenGui")
+		warningGui.Name = "LockWarning"
+		warningGui.ResetOnSpawn = false
+		warningGui.IgnoreGuiInset = true
+		warningGui.DisplayOrder = 8 -- above HUD/compass, below modal UIs
+		warningGui.Enabled = false
+		warningGui.Parent = playerGuiRef
+
+		-- Four red strips around the screen edge form a "border pulse".
+		-- Cheap (4 frames) and reads instantly as "warning state".
+		local function makeStrip(name: string, sizeUDim: UDim2, posUDim: UDim2)
+			local strip = Instance.new("Frame")
+			strip.Name = name
+			strip.Size = sizeUDim
+			strip.Position = posUDim
+			strip.BackgroundColor3 = Color3.fromRGB(255, 40, 40)
+			strip.BackgroundTransparency = 0.2
+			strip.BorderSizePixel = 0
+			strip.Parent = warningGui
+		end
+		makeStrip("Top", UDim2.new(1, 0, 0, 8), UDim2.fromScale(0, 0))
+		makeStrip("Bottom", UDim2.new(1, 0, 0, 8), UDim2.new(0, 0, 1, -8))
+		makeStrip("Left", UDim2.new(0, 8, 1, 0), UDim2.fromScale(0, 0))
+		makeStrip("Right", UDim2.new(0, 8, 1, 0), UDim2.new(1, -8, 0, 0))
+
+		local label = Instance.new("TextLabel")
+		label.Name = "LockedText"
+		label.Size = UDim2.fromOffset(280, 36)
+		label.Position = UDim2.new(0.5, -140, 0.85, 0)
+		label.BackgroundTransparency = 1
+		label.Text = "LOCKED"
+		label.TextColor3 = Color3.fromRGB(255, 60, 60)
+		label.TextStrokeTransparency = 0
+		label.Font = Enum.Font.GothamBlack
+		label.TextScaled = true
+		label.Parent = warningGui
+	end
+
+	lockedByEnemyRemote.OnClientEvent:Connect(function(_attackerUserId: number, _attackerName: string?)
+		ensureWarningGui()
+		if not warningGui then return end
+
+		-- Pulse the warning briefly. Cancel any existing pulse first so
+		-- back-to-back lock pings don't stutter.
+		if warningCoroutine then
+			task.cancel(warningCoroutine)
+			warningCoroutine = nil
+		end
+		SoundManager.play("Hit") -- repurpose Hit sound as a tick; cheap reuse
+
+		warningCoroutine = task.spawn(function()
+			warningGui.Enabled = true
+			-- Two-pulse pattern: bright/dim/bright/dim/off. ~0.8s total.
+			for _, t in { 0.15, 0.4, 0.15, 0.4 } do
+				for _, child in warningGui:GetChildren() do
+					if child:IsA("Frame") then
+						(child :: Frame).BackgroundTransparency = t
+					end
+				end
+				task.wait(0.1)
+			end
+			warningGui.Enabled = false
+			warningCoroutine = nil
+		end)
+	end)
+end
 
 -- Player KO. Server fires this for player-vs-player AND for NPC kills:
 --   killerUserId=0  → killed by NPC (enemyName carries the enemy type)

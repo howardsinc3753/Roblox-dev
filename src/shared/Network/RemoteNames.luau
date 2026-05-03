@@ -8,6 +8,9 @@ return {
 	UnlockDragon = "UnlockDragon",
 	FireBreath = "FireBreath",
 	UseSpecial = "UseSpecial",
+	-- Lock-on telemetry. Client fires when its lock-on target changes (player
+	-- userId, or 0 to clear). Server uses this to warn the locked player.
+	LockOnTarget = "LockOnTarget",
 
 	-- Server → Client (RemoteEvents)
 	DamagePlayer = "DamagePlayer",
@@ -24,6 +27,9 @@ return {
 	-- without needing a Player object lookup.
 	DamageNPC = "DamageNPC", -- Server → shooter only: hit feedback (floating number + sound)
 	NPCBreathFired = "NPCBreathFired", -- Server → all: render projectile from NPC to target
+	-- Server → locked-on player: brief warning flash + tick sound so they
+	-- know an enemy is targeting them. Lets the victim dodge before the hit.
+	LockedByEnemy = "LockedByEnemy",
 
 	-- Client → Server (RemoteFunctions)
 	GetPlayerData = "GetPlayerData",

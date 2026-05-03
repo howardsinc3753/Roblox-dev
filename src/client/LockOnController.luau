@@ -14,12 +14,30 @@
 
 local Players = game:GetService("Players")
 local CollectionService = game:GetService("CollectionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local LockOnController = {}
 
 local player = Players.LocalPlayer
 local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
 local camera = workspace.CurrentCamera
+
+-- Optional: fires LockOnTarget remote so server can warn the locked player.
+-- Resolved lazily because the remote folder may not exist when this module
+-- loads (depends on require order). Caches once found.
+local lockOnTargetRemote: RemoteEvent? = nil
+local function getLockOnRemote(): RemoteEvent?
+	if lockOnTargetRemote then return lockOnTargetRemote end
+	local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+	if remotes then
+		lockOnTargetRemote = remotes:FindFirstChild("LockOnTarget") :: RemoteEvent?
+	end
+	return lockOnTargetRemote
+end
+
+-- Track the last userId we reported to server. Avoids re-firing the remote
+-- every frame when the lock state hasn't changed.
+local lastReportedUserId = 0
 
 -- Tuning. The lock cone is wider than the breath cone so lock-on is more
 -- permissive than aim — you can lock something to your side, then the aim
@@ -78,12 +96,25 @@ local function ensureReticle()
 	makeBracketStroke(RETICLE_BRACKET_THICKNESS, RETICLE_BRACKET_SIZE, UDim.new(1, -RETICLE_BRACKET_THICKNESS), UDim.new(1, -RETICLE_BRACKET_SIZE))
 end
 
+-- Tell server about lock state change. Server forwards a LockedByEnemy
+-- event to the targeted player so they get the warning flash. Sends 0
+-- when unlocking (or when lock is on an NPC, since NPCs don't get warnings).
+local function reportLockToServer(userId: number)
+	if userId == lastReportedUserId then return end
+	lastReportedUserId = userId
+	local remote = getLockOnRemote()
+	if remote then
+		remote:FireServer(userId)
+	end
+end
+
 local function clearLock()
 	currentTarget = nil
 	if reticleGui then
 		reticleGui.Enabled = false
 		reticleGui.Adornee = nil
 	end
+	reportLockToServer(0)
 end
 
 local function setLock(target: LockTarget)
@@ -91,6 +122,12 @@ local function setLock(target: LockTarget)
 	if reticleGui then
 		reticleGui.Adornee = target.rootPart
 		reticleGui.Enabled = true
+	end
+	-- Only player locks generate cross-client warnings (NPCs can't be alerted)
+	if target.kind == "player" and target.userId then
+		reportLockToServer(target.userId)
+	else
+		reportLockToServer(0)
 	end
 end
 

@@ -27,6 +27,8 @@ local function setup()
 		RemoteNames.SpecialEffect,
 		RemoteNames.DamageNPC,
 		RemoteNames.NPCBreathFired,
+		RemoteNames.LockOnTarget,
+		RemoteNames.LockedByEnemy,
 	}
 
 	for _, name in eventNames do

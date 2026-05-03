@@ -48,6 +48,8 @@ local syncTimerRemote = getRemote("SyncTimer")
 local specialEffectRemote = getRemote("SpecialEffect")
 local damageNPCRemote = getRemote("DamageNPC")
 local npcBreathFiredRemote = getRemote("NPCBreathFired")
+local lockOnTargetRemote = getRemote("LockOnTarget")
+local lockedByEnemyRemote = getRemote("LockedByEnemy")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 
 -- ================================
@@ -118,6 +120,21 @@ unlockDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 	data.unlockedDragons[id] = true
 	updateCoinsRemote:FireClient(player, data.coins)
 	print(`[Server] {player.Name} unlocked {id}!`)
+end)
+
+-- Lock-on relay: client reports its current lock target. Server forwards
+-- a brief warning to the targeted player so they know to dodge. We don't
+-- track persistent state — each client message is "this is who I'm locked
+-- on right now" and we ping the target once. Thrash-spammy clients are
+-- self-limited because LockOnController only sends on state changes.
+lockOnTargetRemote.OnServerEvent:Connect(function(player: Player, targetUserId: unknown)
+	if typeof(targetUserId) ~= "number" then return end
+	if targetUserId == 0 then return end -- 0 = unlocked, no warning needed
+	if targetUserId == player.UserId then return end -- can't lock self
+	local target = Players:GetPlayerByUserId(targetUserId :: number)
+	if not target then return end
+	-- Tell target who locked them. Client uses player name to display.
+	lockedByEnemyRemote:FireClient(target, player.UserId, player.Name)
 end)
 
 -- Breath attack: checks players first, then NPCs (priority: PvP fights take
