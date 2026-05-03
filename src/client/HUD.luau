@@ -11,8 +11,8 @@ local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("Drag
 -- Two control hint strings — swapped at runtime when the player toggles input
 -- device. Console text is shorter because TVs sit further back; smaller, denser
 -- text becomes unreadable.
-local CONTROLS_KBM = "WASD: Move | Space/Shift: Up/Down | Q: Boost | LMB: Attack | E: Special | Y: Open Menu"
-local CONTROLS_GAMEPAD = "L Stick: Move | RB/LB: Up/Down | A: Boost | RT: Attack | LT: Special | Y: Menu"
+local CONTROLS_KBM = "WASD: Move | Space/Shift: Up/Down | Q: Boost | LMB: Attack | E: Special | R: Shield | B: Menu"
+local CONTROLS_GAMEPAD = "L Stick: Move | RB/LB: Up/Down | A: Boost | RT: Attack | LT: Special | X: Shield | Y: Menu"
 
 local HUD = {}
 
@@ -35,6 +35,21 @@ local specialNameLabel: TextLabel -- e.g. "FIRE VORTEX"
 local specialEffectLabel: TextLabel -- e.g. "DMG: 30" or "HEAL +40"
 local specialReadyStroke: UIStroke -- pulsing glow border when ready
 local dragonNameLabel: TextLabel
+-- Button-prompt labels in the cooldown panels. Module-level so the live
+-- LastInputTypeChanged hook can swap them between KB+M ("LMB"/"E") and
+-- gamepad ("RT"/"LT") and touch ("TAP") as the player switches devices.
+local breathButtonLabel: TextLabel
+local specialButtonLabel: TextLabel
+local shieldButtonLabel: TextLabel
+-- Boost bar button prompt — sits to the LEFT of the blue boost bar so the
+-- kid sees "HOLD Q" or "HOLD A" right next to the meter that drains. Without
+-- this label kids couldn't figure out which button made the bar drain.
+local boostButtonLabel: TextLabel
+-- Shield panel (defensive ability). Same visual style as the Special panel
+-- so the kid reads them as a matched pair of action slots.
+local shieldCooldownFrame: Frame
+local shieldOverlayFrame: Frame -- dark drain overlay during cooldown
+local shieldReadyStroke: UIStroke -- pulsing border when shield is ready
 
 function HUD.create()
 	screenGui = Instance.new("ScreenGui")
@@ -140,6 +155,30 @@ function HUD.create()
 	boostFillCorner.CornerRadius = UDim.new(0, 4)
 	boostFillCorner.Parent = boostFill
 
+	-- Boost button prompt — pinned to the LEFT edge of the boost bar so the
+	-- kid sees "HOLD Q" / "HOLD A" right next to the meter. Sized to not
+	-- overflow the small bar height; the "HOLD" prefix makes it clear this
+	-- is a press-and-hold action, not a tap.
+	boostButtonLabel = Instance.new("TextLabel")
+	boostButtonLabel.Name = "BoostButton"
+	boostButtonLabel.Size = UDim2.fromOffset(80, 18)
+	-- Position: same row as the boost bar, just to the left of it. The bar
+	-- starts at scale-X 0.4; we anchor the label to scale 0.4 with offset
+	-- -85 so it sits flush left with a tiny gap.
+	boostButtonLabel.Position = UDim2.new(0.4, -85, 0.95, -4)
+	boostButtonLabel.BackgroundColor3 = Color3.fromRGB(20, 30, 50)
+	boostButtonLabel.BackgroundTransparency = 0.2
+	boostButtonLabel.TextColor3 = Color3.fromRGB(120, 200, 255)
+	boostButtonLabel.Text = "HOLD Q" -- swapped by LastInputTypeChanged hook
+	boostButtonLabel.TextStrokeTransparency = 0
+	boostButtonLabel.Font = Enum.Font.GothamBlack
+	boostButtonLabel.TextScaled = true
+	boostButtonLabel.Parent = screenGui
+
+	local boostBtnCorner = Instance.new("UICorner")
+	boostBtnCorner.CornerRadius = UDim.new(0, 4)
+	boostBtnCorner.Parent = boostButtonLabel
+
 	-- === COINS (top right) ===
 	coinLabel = Instance.new("TextLabel")
 	coinLabel.Name = "Coins"
@@ -234,14 +273,15 @@ function HUD.create()
 	breathCooldownFrame.BorderSizePixel = 0
 	breathCooldownFrame.Parent = screenGui
 
-	local breathLabel = Instance.new("TextLabel")
-	breathLabel.Size = UDim2.fromScale(1, 1)
-	breathLabel.BackgroundTransparency = 1
-	breathLabel.Text = "LMB"
-	breathLabel.TextColor3 = Color3.new(1, 1, 1)
-	breathLabel.Font = Enum.Font.GothamBold
-	breathLabel.TextScaled = true
-	breathLabel.Parent = breathCooldownFrame
+	breathButtonLabel = Instance.new("TextLabel")
+	breathButtonLabel.Size = UDim2.fromScale(1, 1)
+	breathButtonLabel.BackgroundTransparency = 1
+	breathButtonLabel.Text = "LMB" -- swapped by LastInputTypeChanged hook below
+	breathButtonLabel.TextColor3 = Color3.new(1, 1, 1)
+	breathButtonLabel.TextStrokeTransparency = 0
+	breathButtonLabel.Font = Enum.Font.GothamBlack
+	breathButtonLabel.TextScaled = true
+	breathButtonLabel.Parent = breathCooldownFrame
 
 	local breathCornerUI = Instance.new("UICorner")
 	breathCornerUI.CornerRadius = UDim.new(0, 8)
@@ -290,16 +330,16 @@ function HUD.create()
 	specialNameLabel.TextScaled = true
 	specialNameLabel.Parent = specialCooldownFrame
 
-	local specialKeyLabel = Instance.new("TextLabel")
-	specialKeyLabel.Size = UDim2.new(1, 0, 0, 36)
-	specialKeyLabel.Position = UDim2.fromOffset(0, 24)
-	specialKeyLabel.BackgroundTransparency = 1
-	specialKeyLabel.Text = "E / RMB"
-	specialKeyLabel.TextColor3 = Color3.new(1, 1, 1)
-	specialKeyLabel.TextStrokeTransparency = 0
-	specialKeyLabel.Font = Enum.Font.GothamBlack
-	specialKeyLabel.TextScaled = true
-	specialKeyLabel.Parent = specialCooldownFrame
+	specialButtonLabel = Instance.new("TextLabel")
+	specialButtonLabel.Size = UDim2.new(1, 0, 0, 36)
+	specialButtonLabel.Position = UDim2.fromOffset(0, 24)
+	specialButtonLabel.BackgroundTransparency = 1
+	specialButtonLabel.Text = "E / RMB" -- swapped by LastInputTypeChanged hook below
+	specialButtonLabel.TextColor3 = Color3.new(1, 1, 1)
+	specialButtonLabel.TextStrokeTransparency = 0
+	specialButtonLabel.Font = Enum.Font.GothamBlack
+	specialButtonLabel.TextScaled = true
+	specialButtonLabel.Parent = specialCooldownFrame
 
 	specialEffectLabel = Instance.new("TextLabel")
 	specialEffectLabel.Name = "Effect"
@@ -324,6 +364,76 @@ function HUD.create()
 	specialOverlayFrame.BorderSizePixel = 0
 	specialOverlayFrame.ZIndex = 5
 	specialOverlayFrame.Parent = specialCooldownFrame
+
+	-- === SHIELD PANEL (right of Special) ===
+	-- Matches the Special panel exactly so the kid reads them as a pair of
+	-- action slots. Positioned 150px right of the Special panel so they sit
+	-- side-by-side in the bottom-left action area:
+	--   [Breath] [Special: NAME / Key / Effect] [Shield: NAME / Key / DEF]
+	shieldCooldownFrame = Instance.new("Frame")
+	shieldCooldownFrame.Name = "ShieldPanel"
+	shieldCooldownFrame.Size = UDim2.fromOffset(140, 90)
+	shieldCooldownFrame.Position = UDim2.new(0, 230, 0.88, -25) -- 80 (special left) + 140 (special width) + 10 padding
+	shieldCooldownFrame.BackgroundColor3 = Color3.fromRGB(40, 80, 130) -- blue tint = "defensive"
+	shieldCooldownFrame.BackgroundTransparency = 0.15
+	shieldCooldownFrame.BorderSizePixel = 0
+	shieldCooldownFrame.ClipsDescendants = true
+	shieldCooldownFrame.Parent = screenGui
+
+	local shieldCornerUI = Instance.new("UICorner")
+	shieldCornerUI.CornerRadius = UDim.new(0, 10)
+	shieldCornerUI.Parent = shieldCooldownFrame
+
+	shieldReadyStroke = Instance.new("UIStroke")
+	shieldReadyStroke.Color = Color3.fromRGB(120, 200, 255)
+	shieldReadyStroke.Thickness = 3
+	shieldReadyStroke.Transparency = 1
+	shieldReadyStroke.Parent = shieldCooldownFrame
+
+	local shieldNameLabel = Instance.new("TextLabel")
+	shieldNameLabel.Name = "Name"
+	shieldNameLabel.Size = UDim2.new(1, -10, 0, 18)
+	shieldNameLabel.Position = UDim2.fromOffset(5, 4)
+	shieldNameLabel.BackgroundTransparency = 1
+	shieldNameLabel.Text = "SHIELD"
+	shieldNameLabel.TextColor3 = Color3.fromRGB(120, 200, 255)
+	shieldNameLabel.TextStrokeTransparency = 0
+	shieldNameLabel.Font = Enum.Font.GothamBlack
+	shieldNameLabel.TextScaled = true
+	shieldNameLabel.Parent = shieldCooldownFrame
+
+	shieldButtonLabel = Instance.new("TextLabel")
+	shieldButtonLabel.Size = UDim2.new(1, 0, 0, 36)
+	shieldButtonLabel.Position = UDim2.fromOffset(0, 24)
+	shieldButtonLabel.BackgroundTransparency = 1
+	shieldButtonLabel.Text = "R" -- swapped to "X" on gamepad / "TAP" on touch
+	shieldButtonLabel.TextColor3 = Color3.new(1, 1, 1)
+	shieldButtonLabel.TextStrokeTransparency = 0
+	shieldButtonLabel.Font = Enum.Font.GothamBlack
+	shieldButtonLabel.TextScaled = true
+	shieldButtonLabel.Parent = shieldCooldownFrame
+
+	local shieldEffectLabel = Instance.new("TextLabel")
+	shieldEffectLabel.Name = "Effect"
+	shieldEffectLabel.Size = UDim2.new(1, -10, 0, 22)
+	shieldEffectLabel.Position = UDim2.new(0, 5, 1, -26)
+	shieldEffectLabel.BackgroundTransparency = 1
+	shieldEffectLabel.Text = "DEF: -80%"
+	shieldEffectLabel.TextColor3 = Color3.fromRGB(150, 220, 255)
+	shieldEffectLabel.TextStrokeTransparency = 0
+	shieldEffectLabel.Font = Enum.Font.GothamBold
+	shieldEffectLabel.TextScaled = true
+	shieldEffectLabel.Parent = shieldCooldownFrame
+
+	shieldOverlayFrame = Instance.new("Frame")
+	shieldOverlayFrame.Name = "CooldownOverlay"
+	shieldOverlayFrame.Size = UDim2.fromScale(1, 1)
+	shieldOverlayFrame.Position = UDim2.fromScale(0, 0)
+	shieldOverlayFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	shieldOverlayFrame.BackgroundTransparency = 0.4
+	shieldOverlayFrame.BorderSizePixel = 0
+	shieldOverlayFrame.ZIndex = 5
+	shieldOverlayFrame.Parent = shieldCooldownFrame
 
 	-- === CONTROLS HINT (bottom center-left) ===
 	-- Auto-switches between KB+M and gamepad strings as the player swaps
@@ -355,20 +465,55 @@ function HUD.create()
 			or inputType == Enum.UserInputType.Gamepad7
 			or inputType == Enum.UserInputType.Gamepad8
 	end
+	-- Per-device labels for the cooldown panels. Same swap pattern as the
+	-- bottom controls hint, but applied to the prominent in-screen breath +
+	-- special panels so the kid sees "RT" / "LT" on Xbox without needing
+	-- to read the small legend at the bottom.
+	local function isTouchInput(inputType: Enum.UserInputType): boolean
+		return inputType == Enum.UserInputType.Touch
+	end
+	local function applyDeviceLabels(device: string)
+		if breathButtonLabel then
+			breathButtonLabel.Text = if device == "gamepad" then "RT"
+				elseif device == "touch" then "TAP"
+				else "LMB"
+		end
+		if specialButtonLabel then
+			specialButtonLabel.Text = if device == "gamepad" then "LT"
+				elseif device == "touch" then "TAP"
+				else "E / RMB"
+		end
+		if shieldButtonLabel then
+			shieldButtonLabel.Text = if device == "gamepad" then "X"
+				elseif device == "touch" then "TAP"
+				else "R"
+		end
+		if boostButtonLabel then
+			boostButtonLabel.Text = if device == "gamepad" then "HOLD A"
+				elseif device == "touch" then "HOLD BOOST"
+				else "HOLD Q"
+		end
+	end
+
 	if isGamepadInput(UserInputService:GetLastInputType()) then
 		controlsLabel.Text = CONTROLS_GAMEPAD
+		applyDeviceLabels("gamepad")
+	elseif isTouchInput(UserInputService:GetLastInputType()) then
+		applyDeviceLabels("touch")
 	end
 	UserInputService.LastInputTypeChanged:Connect(function(inputType: Enum.UserInputType)
 		if isGamepadInput(inputType) then
 			controlsLabel.Text = CONTROLS_GAMEPAD
+			applyDeviceLabels("gamepad")
 		elseif inputType == Enum.UserInputType.Keyboard
 			or inputType == Enum.UserInputType.MouseMovement
 			or inputType == Enum.UserInputType.MouseButton1
 			or inputType == Enum.UserInputType.MouseButton2 then
 			controlsLabel.Text = CONTROLS_KBM
+			applyDeviceLabels("kbm")
+		elseif isTouchInput(inputType) then
+			applyDeviceLabels("touch")
 		end
-		-- Touch is ignored for now (Option D was scoped to console; mobile
-		-- support is a separate sprint).
 	end)
 end
 
@@ -463,7 +608,7 @@ end
 
 -- Animation phase for the "ready" pulse. tick()-based so it's frame-rate
 -- independent and synchronized across all clients (cosmetic, but consistent).
-function HUD.updateCooldowns(breathPct: number, specialPct: number)
+function HUD.updateCooldowns(breathPct: number, specialPct: number, shieldPct: number?)
 	if breathCooldownFrame then
 		breathCooldownFrame.BackgroundTransparency = if breathPct >= 1 then 0 else 0.6
 	end
@@ -482,6 +627,19 @@ function HUD.updateCooldowns(breathPct: number, specialPct: number)
 			specialReadyStroke.Transparency = 0.6 - pulse * 0.6
 		else
 			specialReadyStroke.Transparency = 1 -- hidden during cooldown
+		end
+	end
+
+	-- Same drain + pulse pattern for the Shield panel — matches Special so
+	-- the kid reads them as a pair of action slots with consistent feedback.
+	if shieldPct and shieldCooldownFrame and shieldOverlayFrame and shieldReadyStroke then
+		local drainHeight = 1 - math.clamp(shieldPct, 0, 1)
+		shieldOverlayFrame.Size = UDim2.fromScale(1, drainHeight)
+		if shieldPct >= 1 then
+			local pulse = (math.sin(tick() * math.pi * 2) + 1) * 0.5
+			shieldReadyStroke.Transparency = 0.6 - pulse * 0.6
+		else
+			shieldReadyStroke.Transparency = 1
 		end
 	end
 end
@@ -509,6 +667,106 @@ function HUD.addKillFeed(killerName: string, victimName: string)
 			label:Destroy()
 		end
 	end)
+end
+
+-- ============================================================================
+-- SHIELD TUTORIAL POPUP
+-- ============================================================================
+-- Shows a one-time pointer + callout balloon above the shield panel the FIRST
+-- time the local player takes damage. Teachable moment: kid is hurt → sees
+-- "PRESS R FOR SHIELD!" → presses R → safe. Better than passive controls
+-- text because it's contextually triggered when the kid actually needs it.
+--
+-- Auto-hides after 5 seconds OR when the kid presses the shield button
+-- (whichever comes first). Sticky once-per-session via internal flag.
+
+local shieldTutorialShown = false
+local shieldTutorialFrame: Frame? = nil
+
+function HUD.showShieldHint()
+	if shieldTutorialShown then return end
+	if not shieldCooldownFrame then return end -- HUD not built yet
+	shieldTutorialShown = true
+
+	-- Container above the shield panel. AbsolutePosition is in screen pixels
+	-- so we read the panel's current spot and float above it. If the layout
+	-- shifts (resolution change), the hint is one-shot anyway — fine to be
+	-- a snapshot rather than tracking.
+	local hint = Instance.new("Frame")
+	hint.Name = "ShieldTutorial"
+	hint.AnchorPoint = Vector2.new(0.5, 1)
+	hint.Position = UDim2.new(
+		0, shieldCooldownFrame.AbsolutePosition.X + shieldCooldownFrame.AbsoluteSize.X / 2,
+		0, shieldCooldownFrame.AbsolutePosition.Y - 12
+	)
+	hint.Size = UDim2.fromOffset(220, 64)
+	hint.BackgroundColor3 = Color3.fromRGB(120, 200, 255)
+	hint.BackgroundTransparency = 0.05
+	hint.BorderSizePixel = 0
+	hint.Parent = screenGui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = hint
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.new(1, 1, 1)
+	stroke.Thickness = 2
+	stroke.Parent = hint
+
+	-- Big callout text. Device-aware: read whichever shield button label
+	-- the HUD currently shows so it always matches what the kid sees.
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	local btn = if shieldButtonLabel and shieldButtonLabel.Text ~= "" then shieldButtonLabel.Text else "R"
+	label.Text = `🛡️ Press {btn} for Shield!`
+	label.TextColor3 = Color3.fromRGB(20, 30, 60)
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.Parent = hint
+
+	-- Down-arrow tail pointing at the shield panel below.
+	local arrow = Instance.new("Frame")
+	arrow.Size = UDim2.fromOffset(16, 16)
+	arrow.AnchorPoint = Vector2.new(0.5, 0)
+	arrow.Position = UDim2.new(0.5, 0, 1, -8)
+	arrow.Rotation = 45
+	arrow.BackgroundColor3 = Color3.fromRGB(120, 200, 255)
+	arrow.BorderSizePixel = 0
+	arrow.Parent = hint
+
+	-- Pulse the hint between full and slightly-faded so it draws the eye
+	-- even in combat chaos. Period ~0.6s.
+	shieldTutorialFrame = hint
+	local RunService = game:GetService("RunService")
+	local pulseConn: RBXScriptConnection
+	pulseConn = RunService.Heartbeat:Connect(function()
+		if not hint or not hint.Parent then
+			pulseConn:Disconnect()
+			return
+		end
+		local t = (math.sin(tick() * math.pi * 3.3) + 1) * 0.5
+		hint.BackgroundTransparency = 0.05 + t * 0.25
+	end)
+
+	-- Auto-dismiss after 5 seconds
+	task.delay(5, function()
+		if hint and hint.Parent then
+			hint:Destroy()
+			shieldTutorialFrame = nil
+		end
+	end)
+end
+
+-- Called when the kid presses the shield button so the hint dismisses
+-- immediately (lesson learned, get out of their way). Idempotent.
+function HUD.dismissShieldHint()
+	if shieldTutorialFrame and shieldTutorialFrame.Parent then
+		shieldTutorialFrame:Destroy()
+		shieldTutorialFrame = nil
+	end
+	shieldTutorialShown = true -- mark seen even if it never rendered
 end
 
 return HUD

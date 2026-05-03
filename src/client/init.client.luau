@@ -29,6 +29,7 @@ local LockOnController = require(script.LockOnController)
 local Awareness = require(script.Awareness)
 local WelcomeBanner = require(script.WelcomeBanner)
 local MobileControls = require(script.MobileControls)
+local ControlsOverlay = require(script.ControlsOverlay)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -100,6 +101,7 @@ local specialEffectRemote = remotes:WaitForChild("SpecialEffect") :: RemoteEvent
 local damageNPCRemote = remotes:WaitForChild("DamageNPC") :: RemoteEvent
 local npcBreathFiredRemote = remotes:WaitForChild("NPCBreathFired") :: RemoteEvent
 local lockedByEnemyRemote = remotes:WaitForChild("LockedByEnemy") :: RemoteEvent
+local shieldActivatedRemote = remotes:WaitForChild("ShieldActivated") :: RemoteEvent
 
 -- Dragon spawned/changed
 spawnDragonRemote.OnClientEvent:Connect(function(dragonId: string)
@@ -114,6 +116,11 @@ spawnDragonRemote.OnClientEvent:Connect(function(dragonId: string)
 		FlightController.enable()
 		CameraController.enable()
 		CombatInput.enable()
+		-- FTUE: shows the big controls card on first spawn so kids actually
+		-- learn what every button does (especially on Xbox where the tiny
+		-- bottom-of-screen hint is unreadable from a couch). Self-throttles
+		-- to once per session via internal flag.
+		ControlsOverlay.show()
 	end)
 end)
 
@@ -171,6 +178,13 @@ damagePlayerRemote.OnClientEvent:Connect(function(targetUserId: number, damage: 
 	-- (showing arrows for someone else's damage would just be screen clutter).
 	if targetUserId == player.UserId and sourcePosition then
 		Awareness.showDamageFrom(sourcePosition)
+	end
+
+	-- Teach the kid about the shield button on FIRST damage taken. HUD
+	-- self-throttles to once per session; safe to call on every damage event.
+	-- The arrow + "Press R for Shield!" balloon points at the shield panel.
+	if targetUserId == player.UserId then
+		HUD.showShieldHint()
 	end
 end)
 
@@ -425,6 +439,47 @@ local function flashScreenWhite()
 	end)
 end
 
+-- Shield bubble visual: a 4-second translucent ForceField sphere around the
+-- shielded dragon. Server fires this for everyone (so spectators see it too)
+-- with the shielded player's userId.
+shieldActivatedRemote.OnClientEvent:Connect(function(userId: number)
+	local target = Players:GetPlayerByUserId(userId)
+	if not target or not target.Character or not target.Character.PrimaryPart then return end
+	local rootPart = target.Character.PrimaryPart
+
+	-- Bubble sphere parented to the dragon model so it follows automatically.
+	local bubble = Instance.new("Part")
+	bubble.Name = "ShieldBubble"
+	bubble.Shape = Enum.PartType.Ball
+	bubble.Size = Vector3.new(20, 20, 20)
+	bubble.Color = Color3.fromRGB(120, 200, 255)
+	bubble.Material = Enum.Material.ForceField -- looks shieldy out of the box
+	bubble.Anchored = false
+	bubble.CanCollide = false
+	bubble.Massless = true
+	bubble.Transparency = 0.3
+	bubble.CFrame = rootPart.CFrame
+	bubble.Parent = target.Character
+
+	-- Weld so the bubble follows the dragon without physics interactions.
+	local weld = Instance.new("WeldConstraint")
+	weld.Part0 = rootPart
+	weld.Part1 = bubble
+	weld.Parent = bubble
+
+	-- Auto-clean after the shield duration. Match the server's SHIELD_DURATION
+	-- (4 seconds) — if these drift, the visual would mislead the kid.
+	task.delay(4.0, function()
+		if bubble and bubble.Parent then
+			bubble:Destroy()
+		end
+	end)
+
+	-- Distinct "shield up" sound so the kid hears confirmation independent
+	-- of the visual (helpful when shielding while looking elsewhere).
+	SoundManager.play("Special") -- reuse existing audio; adequate placeholder
+end)
+
 specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: string, position: Vector3, direction: Vector3?)
 	-- Element-specific layered SFX so each special reads distinctly. Fire is
 	-- a deep whoosh+roar, Ice is crystalline shimmer, Lightning crackles, etc.
@@ -662,7 +717,8 @@ RunService.Heartbeat:Connect(function(dt: number)
 	-- Update cooldown indicators
 	HUD.updateCooldowns(
 		CombatInput.getBreathCooldownPercent(),
-		CombatInput.getSpecialCooldownPercent()
+		CombatInput.getSpecialCooldownPercent(),
+		CombatInput.getShieldCooldownPercent()
 	)
 
 	-- Update round timer
@@ -698,6 +754,15 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 		DragonSelectUI.toggle()
 	elseif input.KeyCode == Enum.KeyCode.F then
 		LockOnController.onLockKeyPressed()
+	end
+
+	-- Dismiss the shield tutorial popup the moment the kid presses the
+	-- shield button (R on KB, X on gamepad). They learned the lesson —
+	-- get the popup off the screen so it doesn't linger during combat.
+	-- HUD.dismissShieldHint is idempotent so calling on every shield press
+	-- after the first is harmless.
+	if input.KeyCode == Enum.KeyCode.R or input.KeyCode == Enum.KeyCode.ButtonX then
+		HUD.dismissShieldHint()
 	end
 end)
 
