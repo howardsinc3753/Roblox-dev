@@ -113,17 +113,74 @@ local function makePart(name: string, parent: Instance, props: { [string]: any }
 	return p
 end
 
--- Build the stone disc floor. Cylinder rotated 90° around X axis to lay flat.
--- Glowing rune accents at cardinal compass points hint at the magic theme.
+-- Build the stone disc floor + underbase. The disc alone reads as "stuff
+-- hanging in space" so we layer a thicker rock chunk below + a tapered
+-- bottom + ambient clouds floating around. Now reads as a substantial
+-- piece of floating sky island instead of a magic carpet.
 local function buildFloor(parent: Instance)
+	-- Surface disc — what players actually walk on
 	local floor = makePart("LairFloor", parent, {
 		Shape = Enum.PartType.Cylinder,
 		Size = Vector3.new(FLOOR_THICKNESS, FLOOR_RADIUS * 2, FLOOR_RADIUS * 2),
 		CFrame = CFrame.new(LAIR_CENTER) * CFrame.Angles(0, 0, math.rad(90)),
 		Color = Color3.fromRGB(80, 70, 90), -- weathered stone
 		Material = Enum.Material.Slate,
-		CanCollide = true, -- floor IS collidable (only piece that is)
+		CanCollide = true, -- floor IS collidable
 	})
+
+	-- Underbase: thick rock body below the disc. Large block of darker
+	-- stone, gives the "this is a chunk of floating island, not just a
+	-- platform" silhouette. Decorative-only, non-collidable so it doesn't
+	-- block the portal teleport landing zone underneath.
+	makePart("LairUnderbase", parent, {
+		Size = Vector3.new(FLOOR_RADIUS * 1.9, 70, FLOOR_RADIUS * 1.9),
+		CFrame = CFrame.new(LAIR_CENTER + Vector3.new(0, -38, 0)),
+		Color = Color3.fromRGB(55, 50, 65),
+		Material = Enum.Material.Rock,
+	})
+
+	-- Tapered bottom: smaller block under the underbase. Together they
+	-- read as "island chunk narrowing to a point" — classic floating-isle
+	-- silhouette from sky-fantasy art.
+	makePart("LairTaperedBase", parent, {
+		Size = Vector3.new(FLOOR_RADIUS * 1.0, 50, FLOOR_RADIUS * 1.0),
+		CFrame = CFrame.new(LAIR_CENTER + Vector3.new(0, -100, 0)),
+		Color = Color3.fromRGB(40, 35, 50),
+		Material = Enum.Material.Rock,
+	})
+
+	-- Pointed bottom tip — a flat-bottomed cone-ish chunk for the silhouette
+	makePart("LairBottomTip", parent, {
+		Size = Vector3.new(FLOOR_RADIUS * 0.4, 40, FLOOR_RADIUS * 0.4),
+		CFrame = CFrame.new(LAIR_CENTER + Vector3.new(0, -145, 0)),
+		Color = Color3.fromRGB(30, 25, 40),
+		Material = Enum.Material.Rock,
+	})
+
+	-- Ambient clouds floating around the Lair. Soft glass spheres at varied
+	-- distances + heights — give visual context so the Lair isn't surrounded
+	-- by empty void. 12 clouds at scattered positions.
+	for i = 1, 12 do
+		local angle = (i - 1) * math.pi * 2 / 12 + math.random() * 0.3
+		local distance = 130 + math.random(0, 60)
+		local height = math.random(-60, 40)
+		makePart(`AmbientCloud_{i}`, parent, {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(
+				35 + math.random(0, 25),
+				20 + math.random(0, 12),
+				35 + math.random(0, 25)
+			),
+			CFrame = CFrame.new(LAIR_CENTER + Vector3.new(
+				math.cos(angle) * distance,
+				height,
+				math.sin(angle) * distance
+			)),
+			Color = Color3.fromRGB(255, 255, 255),
+			Material = Enum.Material.SmoothPlastic,
+			Transparency = 0.45,
+		})
+	end
 
 	-- Subtle inner glow ring at floor surface for atmosphere
 	local glowRing = makePart("FloorGlowRing", parent, {
