@@ -7,9 +7,10 @@ You're being onboarded to a Roblox game development project that uses our shared
 ## Step 1: Project rules + framework
 Read in this order:
 1. `CLAUDE.md` — project setup, tech stack (Luau + Rojo + Wally + Lune), AI workflow rules ("AI handles code/logic, human handles visuals/QA")
-2. `DESIGN.md` — game design (current spec or template for new game)
-3. `SKILL.md` — Roblox SDK reference router (which `references/<file>.md` to read for which task)
-4. List `references/` so you know what specialized docs are available
+2. `CODE_MAP.md` — **REQUIRED**. Dependency graph + "if you touch X, these things break" cheatsheet. Read before editing ANY server module.
+3. `DESIGN.md` — game design (current spec or template for new game)
+4. `SKILL.md` — Roblox SDK reference router (which `references/<file>.md` to read for which task)
+5. List `references/` so you know what specialized docs are available
 
 ## Step 2: Current state
 1. `git log --oneline -20` — recent work, sprint history
