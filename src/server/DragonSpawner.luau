@@ -222,8 +222,12 @@ local function loadMeshTemplate(dragonId: string, assetId: number): Model?
 end
 
 -- Attach the loaded Meshy mesh to a player's dragon model as visual.
--- Welds all parts of the mesh to the body (HumanoidRootPart equivalent),
--- removes placeholder visual parts (head, wings, tail), keeps body transparent.
+-- Architecture: mesh parts weld to an invisible MeshAnchor part, NOT to the
+-- body directly. A Motor6D joint connects body → MeshAnchor. FlightController
+-- drives Motor6D.Transform each frame to apply wobble/tilt to the visible mesh
+-- without rotating the body itself. This keeps the body's rotation (which the
+-- camera follows and breath aim depends on) rock-steady — the camera no longer
+-- shakes when the dragon wobbles.
 local function attachMeshVisual(dragonModel: Model, meshAssetId: number, dragonId: string, scale: number)
 	local meshTemplate = loadMeshTemplate(dragonId, meshAssetId)
 	if not meshTemplate then return end
@@ -231,34 +235,53 @@ local function attachMeshVisual(dragonModel: Model, meshAssetId: number, dragonI
 	local body = dragonModel:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not body then return end
 
-	-- Hide the placeholder visual parts (keep body for physics, hide visually)
+	-- Hide the placeholder visual parts (body stays for physics, hidden visually)
 	for _, partName in { "HumanoidRootPart", "Head", "WingLeft", "WingRight", "Tail" } do
 		local part = dragonModel:FindFirstChild(partName) :: BasePart?
 		if part then
 			part.Transparency = 1
-			-- Disable the placeholder body's color so weld clipping doesn't show
 		end
 	end
 
-	-- Scale the mesh
+	-- MeshAnchor: invisible carrier part that owns the mesh.
+	-- Mesh BaseParts weld to this. The Motor6D drives this part's offset from
+	-- the body, which moves the welded mesh with it.
+	local meshAnchor = Instance.new("Part")
+	meshAnchor.Name = "MeshAnchor"
+	meshAnchor.Size = Vector3.new(0.5, 0.5, 0.5)
+	meshAnchor.Transparency = 1
+	meshAnchor.CanCollide = false
+	meshAnchor.Massless = true
+	meshAnchor.Anchored = false
+	meshAnchor.CFrame = body.CFrame
+	meshAnchor.Parent = dragonModel
+
+	-- Motor6D: client-driven joint for visual-only wobble/tilt.
+	-- FlightController writes to Transform every frame on Heartbeat.
+	local meshMotor = Instance.new("Motor6D")
+	meshMotor.Name = "MeshMotor"
+	meshMotor.Part0 = body
+	meshMotor.Part1 = meshAnchor
+	meshMotor.C0 = CFrame.new(0, 0, 0)
+	meshMotor.C1 = CFrame.new(0, 0, 0)
+	meshMotor.Parent = body
+
+	-- Scale + position the mesh
 	if meshTemplate:IsA("Model") then
 		meshTemplate:ScaleTo(scale)
+		meshTemplate:PivotTo(body.CFrame)
 	end
 
-	-- Position the mesh at the body and weld all parts to it
-	local meshCenter: Vector3 = body.Position
-	if meshTemplate:IsA("Model") then
-		meshTemplate:PivotTo(CFrame.new(meshCenter))
-	end
-
-	-- Weld each part of the mesh to the body
+	-- Weld every mesh BasePart to MeshAnchor (NOT body). This is the key
+	-- architectural change — driving Motor6D.Transform now rotates the entire
+	-- mesh as one rigid body, while the actual physics body stays steady.
 	for _, descendant in meshTemplate:GetDescendants() do
 		if descendant:IsA("BasePart") then
 			descendant.Anchored = false
 			descendant.CanCollide = false
 			descendant.Massless = true
 			local weld = Instance.new("WeldConstraint")
-			weld.Part0 = body
+			weld.Part0 = meshAnchor
 			weld.Part1 = descendant
 			weld.Parent = descendant
 		end

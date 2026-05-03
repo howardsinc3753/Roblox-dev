@@ -33,6 +33,16 @@ local BOOST_MULTIPLIER = 1.8
 local currentDragonId = "Ember"
 local enabled = false
 
+-- Visual wobble: drives MeshMotor.Transform on the dragon mesh.
+-- The body itself stays steady (oriented to camera direction). Only the
+-- visible mesh wobbles. Pitch/roll frequencies are slightly offset so they
+-- drift in and out of phase — gives a natural figure-8 motion.
+local bobTime = 0
+local PITCH_AMPLITUDE = math.rad(15)
+local PITCH_FREQ = 5 -- rad/s, ~1.25s period
+local ROLL_AMPLITUDE = math.rad(10)
+local ROLL_FREQ = 3.5 -- rad/s, ~1.8s period
+
 function FlightController.setDragon(dragonId: string)
 	currentDragonId = dragonId
 end
@@ -122,9 +132,22 @@ RunService.Heartbeat:Connect(function(dt: number)
 
 	linearVelocity.VectorVelocity = moveDirection * speed
 
-	-- Face the camera direction
+	-- Body orientation: face the camera direction (steady — no wobble).
+	-- Wobble lives on the MeshMotor below, not on the body itself.
 	local targetCF = CFrame.new(rootPart.Position, rootPart.Position + lookVector)
 	alignOrientation.CFrame = targetCF
+
+	-- Drive the visual wobble via MeshMotor. This rotates only the welded
+	-- mesh (via MeshAnchor) — the body stays put, so the camera and breath
+	-- aim don't shake. Wobble dampens during boost (stable fast flight).
+	bobTime += dt
+	local meshMotor = rootPart:FindFirstChild("MeshMotor") :: Motor6D?
+	if meshMotor then
+		local wobbleScale = if boosting and boostMeter > 0 then 0.4 else 1.0
+		local pitchWobble = math.sin(bobTime * PITCH_FREQ) * PITCH_AMPLITUDE * wobbleScale
+		local rollWobble = math.cos(bobTime * ROLL_FREQ) * ROLL_AMPLITUDE * wobbleScale
+		meshMotor.Transform = CFrame.Angles(pitchWobble, 0, rollWobble)
+	end
 end)
 
 return FlightController
