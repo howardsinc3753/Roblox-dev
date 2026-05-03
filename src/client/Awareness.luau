@@ -24,8 +24,8 @@ local camera = workspace.CurrentCamera
 
 -- Layout constants. Tuned for 1920x1080 baseline; UDim2.fromScale handles
 -- proportional scaling for other resolutions.
-local EDGE_PADDING = 60 -- pixels from screen edge to the indicator
-local COMPASS_TRIANGLE_SIZE = 28
+local EDGE_PADDING = 50 -- pixels from screen edge to the indicator
+local COMPASS_TRIANGLE_SIZE = 44 -- bigger so kids actually notice it on screen edge
 local DAMAGE_ARC_SIZE = 80
 local DAMAGE_FADE_DURATION = 1.5 -- seconds
 local MAX_COMPASS_TRACKED = 5 -- show closest N off-screen entities
@@ -191,32 +191,37 @@ local function isOnScreen(worldPos: Vector3): boolean
 	return screenPoint.Z > 0
 end
 
--- Build or reuse a compass arrow for a given entity ID
+-- Build or reuse a compass arrow for a given entity ID. Uses a TextLabel
+-- with the ▲ unicode character so it actually LOOKS like an arrow when
+-- rotated, instead of the previous "rotated rounded square" that read as
+-- a colored dot. The text strokes give it readability against any
+-- background; the colored fill identifies entity type at a glance.
 local function getOrCreateArrow(entityId: string, color: Color3): Frame
 	local arrow = compassArrows[entityId]
 	if arrow then
 		return arrow
 	end
 
-	-- Triangle made from a square frame rotated 45° with one corner sharper
-	-- via UIStroke + tight UICorner. Cheap and looks fine.
+	-- Outer Frame is the rotation target. The ▲ TextLabel inside renders
+	-- the arrow shape; rotating the Frame rotates the whole thing.
 	local frame = Instance.new("Frame")
 	frame.Name = `Arrow_{entityId}`
 	frame.Size = UDim2.fromOffset(COMPASS_TRIANGLE_SIZE, COMPASS_TRIANGLE_SIZE)
-	frame.BackgroundColor3 = color
-	frame.BorderSizePixel = 0
+	frame.BackgroundTransparency = 1
 	frame.AnchorPoint = Vector2.new(0.5, 0.5)
-	frame.BackgroundTransparency = 0.2
 	frame.Parent = compassContainer
 
-	local stroke = Instance.new("UIStroke")
-	stroke.Color = Color3.new(1, 1, 1)
-	stroke.Thickness = 2
-	stroke.Parent = frame
-
-	local corner = Instance.new("UICorner")
-	corner.CornerRadius = UDim.new(0, 4)
-	corner.Parent = frame
+	local label = Instance.new("TextLabel")
+	label.Name = "Glyph"
+	label.Size = UDim2.fromScale(1, 1)
+	label.BackgroundTransparency = 1
+	label.Text = "▲" -- points up by default; matches rotation=0 = "ahead of you"
+	label.TextColor3 = color
+	label.TextStrokeTransparency = 0
+	label.TextStrokeColor3 = Color3.new(0, 0, 0)
+	label.Font = Enum.Font.GothamBlack
+	label.TextScaled = true
+	label.Parent = frame
 
 	compassArrows[entityId] = frame
 	return frame
