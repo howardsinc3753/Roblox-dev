@@ -343,18 +343,20 @@ specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: stri
 		particles.SpreadAngle = Vector2.new(20, 20)
 		particles.Parent = attach
 
-		-- Animate: cone widens (radius grows) + fades over 0.6s
+		-- Animate: short burst (~0.3s) so the player can't outrun the visual
+		-- by boosting forward immediately after cast. The cone is anchored at
+		-- the cast position; if it lingered, you'd see it floating behind you.
 		task.spawn(function()
-			for i = 1, 18 do
-				task.wait(0.033)
-				local r = 4 + i * 0.8 -- grows from 4 to 18 studs radius
-				local t = 0.25 + (i / 18) * 0.7
+			for i = 1, 10 do
+				task.wait(0.03)
+				local r = 4 + i * 1.4 -- grows from 4 to 18 studs radius
+				local t = 0.25 + (i / 10) * 0.7
 				vortex.Size = Vector3.new(60, r, r)
 				vortex.Transparency = t
-				light.Brightness = 4 * (1 - i / 18)
+				light.Brightness = 4 * (1 - i / 10)
 			end
 			particles.Enabled = false
-			task.wait(0.5) -- let trailing embers fade
+			task.wait(0.2) -- short trailing-particle fade
 			vortex:Destroy()
 		end)
 
@@ -414,14 +416,15 @@ specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: stri
 		sparks.Parent = attach
 
 		task.spawn(function()
-			-- Flicker pattern: bright/dim alternation gives "electric" feel
-			for i = 1, 12 do
+			-- Flicker pattern: bright/dim alternation gives "electric" feel.
+			-- Short total (~0.32s) so player can't outrun the beam by boosting.
+			for i = 1, 8 do
 				task.wait(0.04)
 				beam.Transparency = if i % 2 == 0 then 0.15 else 0.5
-				beam.Size = Vector3.new(70, 3 + i * 0.4, 3 + i * 0.4)
+				beam.Size = Vector3.new(70, 3 + i * 0.5, 3 + i * 0.5)
 			end
 			sparks.Enabled = false
-			task.wait(0.3)
+			task.wait(0.15)
 			beam:Destroy()
 		end)
 

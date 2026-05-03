@@ -308,8 +308,12 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 
 		lastSpecialTime = tick()
 
+		-- Send camera direction so the server can cone-aim Fire/Lightning
+		-- specials where the player is *looking* instead of where the body
+		-- is *facing*. Body has velocity-tilt that would otherwise aim the
+		-- vortex 30deg below your crosshair while diving.
 		if useSpecialRemote then
-			useSpecialRemote:FireServer()
+			useSpecialRemote:FireServer(camera.CFrame.LookVector)
 		end
 
 		-- TODO: special ability visual effects per element

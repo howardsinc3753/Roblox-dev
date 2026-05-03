@@ -319,12 +319,12 @@ function Awareness.updateCompass()
 		end
 	end
 
-	-- GC sweep: if an arrow has been hidden for many frames AND its entity is
-	-- gone, destroy it to keep the table from growing unboundedly. Cheap
-	-- enough to do every frame given the small N.
+	-- GC sweep: destroy arrows whose entity is gone (NPC despawned, player
+	-- left the server). Without this, every player who joins+leaves leaves a
+	-- phantom Frame in compassArrows forever — bounded leak that grows with
+	-- session length. Same logic for both NPC arrows and player arrows.
 	for entityId, arrow in compassArrows do
-		if not arrow.Visible and (entityId:sub(1, 4) == "npc_") then
-			-- NPC arrows: check if any candidate matches; if not, the NPC died
+		if not arrow.Visible then
 			local stillExists = false
 			for _, c in candidates do
 				if c.id == entityId then stillExists = true; break end

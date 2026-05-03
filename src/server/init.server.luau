@@ -188,8 +188,10 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	end
 end)
 
--- Special ability — all 6 elements implemented
-useSpecialRemote.OnServerEvent:Connect(function(player: Player)
+-- Special ability — all 6 elements implemented.
+-- Client now passes camera direction (2nd arg) so cone specials aim where
+-- the player is looking, not where the body is tilted (climb/dive/bank).
+useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection: unknown)
 	if not CombatManager.canUseSpecial(player) then return end
 	if not RoundManager.isActive() then return end
 
@@ -204,10 +206,16 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 	if not character or not character.PrimaryPart then return end
 	local pos = character.PrimaryPart.Position
 
-	-- Body's facing direction (server-authoritative; matches camera direction
-	-- since FlightController orients body to camera). Used by forward-cone
-	-- specials so the panic-button sweeps in front of the dragon.
-	local forward = character.PrimaryPart.CFrame.LookVector
+	-- Resolve cone direction. Trust the client's camera direction if it's a
+	-- valid Vector3 with reasonable magnitude (Roblox-validated server-side
+	-- to prevent garbage payloads). Fall back to body LookVector if missing
+	-- or invalid — better to aim slightly off than to no-op the special.
+	local forward: Vector3
+	if typeof(clientDirection) == "Vector3" and clientDirection.Magnitude > 0.5 and clientDirection.Magnitude < 2 then
+		forward = clientDirection.Unit
+	else
+		forward = character.PrimaryPart.CFrame.LookVector
+	end
 
 	if dragon.element == "Fire" then
 		-- Fire Vortex: 90-degree forward cone of flame, 60 stud range. Hits
