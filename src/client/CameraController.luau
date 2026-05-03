@@ -20,13 +20,13 @@ local camera = game.Workspace.CurrentCamera
 local CAMERA_OFFSET_NEAR = Vector3.new(0, 4, 8) -- close third-person
 local CAMERA_OFFSET_FAR = Vector3.new(0, 18, 32) -- aerial-combat default
 local CAMERA_SENSITIVITY = 0.3
-local CAMERA_SMOOTHNESS = 0.2
+local CAMERA_SMOOTH_RATE = 12 -- per second; ~0.2 alpha at 60fps, frame-rate independent
 local ZOOM_SENSITIVITY = 0.1
 
 -- FOV punch: lerps to BOOST FOV while boosting, back to DEFAULT when not.
 local FOV_DEFAULT = 70
 local FOV_BOOST = 85
-local FOV_LERP_RATE = 6 -- per second (lerp factor = min(rate*dt, 1))
+local FOV_LERP_RATE = 6 -- per second; alpha = 1 - exp(-rate*dt)
 
 local yaw = 0
 local pitch = -25 -- angled down so you see enemies below and ahead
@@ -83,12 +83,17 @@ RunService.RenderStepped:Connect(function(dt: number)
 	local cameraForward = rotation:VectorToWorldSpace(Vector3.new(0, 0, -1))
 	local targetPos = dragonPos + cameraForward * 10
 
+	-- Camera smoothness: 1 - exp(-rate*dt) is the canonical frame-rate
+	-- independent exponential lerp. Previously used a fixed 0.2 alpha which
+	-- made the camera feel twice as laggy at 30fps as at 60fps.
 	local targetCF = CFrame.new(cameraPos, targetPos)
-	camera.CFrame = camera.CFrame:Lerp(targetCF, CAMERA_SMOOTHNESS)
+	local cameraSmooth = 1 - math.exp(-CAMERA_SMOOTH_RATE * dt)
+	camera.CFrame = camera.CFrame:Lerp(targetCF, cameraSmooth)
 
-	-- FOV punch when boosting. Frame-rate-independent lerp.
+	-- FOV punch when boosting. Same exp form as camera smoothing for
+	-- consistency and accuracy at low framerates.
 	local targetFOV = if FlightController.isBoosting() then FOV_BOOST else FOV_DEFAULT
-	local fovLerp = math.min(FOV_LERP_RATE * dt, 1)
+	local fovLerp = 1 - math.exp(-FOV_LERP_RATE * dt)
 	camera.FieldOfView += (targetFOV - camera.FieldOfView) * fovLerp
 end)
 

@@ -33,22 +33,29 @@ local BOOST_MULTIPLIER = 1.8
 local currentDragonId = "Ember"
 local enabled = false
 
--- Visual wobble: drives MeshMotor.Transform on the dragon mesh.
--- The body itself stays steady (oriented to camera direction). Only the
--- visible mesh wobbles. Pitch/roll frequencies are slightly offset so they
--- drift in and out of phase — gives a natural figure-8 motion.
-local bobTime = 0
+-- Visual wobble: drives MeshMotor.Transform on EVERY player's dragon, not
+-- just the local one. Motor6D.Transform set from a LocalScript only replicates
+-- when the writer has network ownership, so the local client must drive every
+-- visible dragon's wobble itself. Uses tick() for phase coherence — every
+-- client computes the same wobble for the same dragon at the same time.
 local PITCH_AMPLITUDE = math.rad(15)
 local PITCH_FREQ = 5 -- rad/s, ~1.25s period
 local ROLL_AMPLITUDE = math.rad(10)
 local ROLL_FREQ = 3.5 -- rad/s, ~1.8s period
 
 -- Velocity-based body tilt: tilts the dragon BODY (not just visual) so it
--- visibly climbs nose-up, dives nose-down, and banks into turns. This is
--- separate from wobble — it fights the body's "always face camera" rule
--- by adding a velocity-derived offset to the AlignOrientation target.
+-- visibly climbs nose-up, dives nose-down, and banks into turns.
 local PITCH_FROM_VELOCITY = math.rad(30) -- max nose-up/down at full speed
 local ROLL_FROM_VELOCITY = math.rad(35) -- max bank angle at full lateral speed
+local VELOCITY_SMOOTH_RATE = 8 -- per second; smooths physics jitter from raw velocity
+
+-- Smoothed velocity for tilt. Raw AssemblyLinearVelocity has small physics
+-- fluctuations from constraint resolution that flicker the body tilt visibly.
+local smoothedVelocity = Vector3.zero
+
+-- Wobble phase accumulator. Drives the sin/cos oscillations on MeshMotor.
+-- Persists across frames so the wobble is continuous regardless of frame rate.
+local bobTime = 0
 
 function FlightController.setDragon(dragonId: string)
 	currentDragonId = dragonId
@@ -143,36 +150,53 @@ RunService.Heartbeat:Connect(function(dt: number)
 
 	linearVelocity.VectorVelocity = moveDirection * speed
 
+	-- Smooth the raw physics velocity to kill constraint-jitter on tilt.
+	-- Frame-rate-independent: 1 - exp(-rate*dt) is the canonical alpha for
+	-- exponential smoothing.
+	local rawVelocity = rootPart.AssemblyLinearVelocity
+	local smoothAlpha = 1 - math.exp(-VELOCITY_SMOOTH_RATE * dt)
+	smoothedVelocity = smoothedVelocity:Lerp(rawVelocity, smoothAlpha)
+
 	-- Velocity-based body tilt: nose up when climbing, nose down when diving,
-	-- bank left/right when strafing. Reads the actual physics velocity to
-	-- ensure the tilt matches what the dragon is *doing*, not what the player
-	-- is *pressing* (graceful even when boost meter empties mid-input).
-	local velocity = rootPart.AssemblyLinearVelocity
+	-- bank left/right when strafing. Reads smoothed physics velocity so the
+	-- tilt matches what the dragon is *doing*, not what the player is
+	-- *pressing* (graceful even when boost meter empties mid-input).
 	local maxFlightSpeed = baseSpeed * BOOST_MULTIPLIER
 	local pitchFromVel = 0
 	local rollFromVel = 0
-	if maxFlightSpeed > 0 and velocity.Magnitude > 0.1 then
-		pitchFromVel = math.clamp(velocity.Y / maxFlightSpeed, -1, 1) * PITCH_FROM_VELOCITY
-		local lateralSpeed = velocity:Dot(rightVector)
+	if maxFlightSpeed > 0 and smoothedVelocity.Magnitude > 0.1 then
+		pitchFromVel = math.clamp(smoothedVelocity.Y / maxFlightSpeed, -1, 1) * PITCH_FROM_VELOCITY
+		local lateralSpeed = smoothedVelocity:Dot(rightVector)
 		rollFromVel = -math.clamp(lateralSpeed / maxFlightSpeed, -1, 1) * ROLL_FROM_VELOCITY
 	end
 
 	-- Body orientation: face camera direction + velocity-based tilt. Wobble
-	-- lives on the MeshMotor below, not on the body itself.
+	-- is driven separately (in the wobble loop below) for ALL players' dragons.
 	local targetCF = CFrame.new(rootPart.Position, rootPart.Position + lookVector)
 		* CFrame.Angles(pitchFromVel, 0, rollFromVel)
 	alignOrientation.CFrame = targetCF
+end)
 
-	-- Drive the visual wobble via MeshMotor. This rotates only the welded
-	-- mesh (via MeshAnchor) — the body stays put, so the camera and breath
-	-- aim don't shake. Wobble dampens during boost (stable fast flight).
-	bobTime += dt
-	local meshMotor = rootPart:FindFirstChild("MeshMotor") :: Motor6D?
-	if meshMotor then
-		local wobbleScale = if boosting and boostMeter > 0 then 0.4 else 1.0
-		local pitchWobble = math.sin(bobTime * PITCH_FREQ) * PITCH_AMPLITUDE * wobbleScale
-		local rollWobble = math.cos(bobTime * ROLL_FREQ) * ROLL_AMPLITUDE * wobbleScale
-		meshMotor.Transform = CFrame.Angles(pitchWobble, 0, rollWobble)
+-- Wobble loop: drives Motor6D.Transform on every player's dragon mesh.
+-- Runs unconditionally (not gated by `enabled`) — other dragons should keep
+-- wobbling visually even when the local player is dead or has controls
+-- disabled. tick() is approximately sync'd across clients, so wobble phase
+-- is coherent (every client sees the same wobble at the same time).
+RunService.Heartbeat:Connect(function(_dt: number)
+	local sharedTime = tick()
+	local pitchWobble = math.sin(sharedTime * PITCH_FREQ) * PITCH_AMPLITUDE
+	local rollWobble = math.cos(sharedTime * ROLL_FREQ) * ROLL_AMPLITUDE
+	local wobbleTransform = CFrame.Angles(pitchWobble, 0, rollWobble)
+
+	for _, p in Players:GetPlayers() do
+		local char = p.Character
+		if not char then continue end
+		local rp = char:FindFirstChild("HumanoidRootPart") :: BasePart?
+		if not rp then continue end
+		local motor = rp:FindFirstChild("MeshMotor") :: Motor6D?
+		if motor then
+			motor.Transform = wobbleTransform
+		end
 	end
 end)
 

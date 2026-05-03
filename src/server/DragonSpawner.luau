@@ -272,6 +272,11 @@ local function attachMeshVisual(dragonModel: Model, meshAssetId: number, dragonI
 		meshTemplate:PivotTo(body.CFrame)
 	end
 
+	-- Parent BEFORE creating welds. Roblox tolerates welds across nil-parent
+	-- parts in practice, but it's fragile — keep weld creation inside the tree.
+	meshTemplate.Name = "MeshyVisual"
+	meshTemplate.Parent = dragonModel
+
 	-- Weld every mesh BasePart to MeshAnchor (NOT body). This is the key
 	-- architectural change — driving Motor6D.Transform now rotates the entire
 	-- mesh as one rigid body, while the actual physics body stays steady.
@@ -287,8 +292,19 @@ local function attachMeshVisual(dragonModel: Model, meshAssetId: number, dragonI
 		end
 	end
 
-	meshTemplate.Name = "MeshyVisual"
-	meshTemplate.Parent = dragonModel
+	-- Pivot offset: rotate the mesh around its visual center, not the body's
+	-- origin. Without this, wobble looks like the dragon is swinging on a
+	-- stick (Meshy meshes commonly export with pivot at bbox corner, not
+	-- geometric center). Setting C0 = C1 keeps MeshAnchor.CFrame at body.CFrame
+	-- when Transform = identity, but moves the rotation pivot to the visual
+	-- center for any non-identity Transform.
+	if meshTemplate:IsA("Model") then
+		local meshCF, _meshSize = meshTemplate:GetBoundingBox()
+		local localOffset = body.CFrame:PointToObjectSpace(meshCF.Position)
+		local pivotOffset = CFrame.new(localOffset)
+		meshMotor.C0 = pivotOffset
+		meshMotor.C1 = pivotOffset
+	end
 end
 
 function DragonSpawner.spawn(player: Player, dragonId: string): Model
@@ -308,18 +324,16 @@ function DragonSpawner.spawn(player: Player, dragonId: string): Model
 		attachMeshVisual(model, dragonCfg.meshAssetId, dragonId, dragonCfg.meshScale or 1)
 	end
 
-	player.Character = model
-
-	-- Set up constraints for flight (modern API, replaces deprecated BodyMovers)
+	-- Constraints created BEFORE player.Character = model. Otherwise the client
+	-- briefly receives a character without flight constraints and FlightController
+	-- silently no-ops on early-return for several frames (worse on dragon-swap).
 	local rootPart = model.PrimaryPart :: BasePart
 	rootPart.Anchored = false
 
-	-- Attachment for constraints
 	local attachment = Instance.new("Attachment")
 	attachment.Name = "FlightAttachment"
 	attachment.Parent = rootPart
 
-	-- LinearVelocity for movement (replaces BodyVelocity)
 	local linearVelocity = Instance.new("LinearVelocity")
 	linearVelocity.Name = "FlightVelocity"
 	linearVelocity.Attachment0 = attachment
@@ -328,7 +342,6 @@ function DragonSpawner.spawn(player: Player, dragonId: string): Model
 	linearVelocity.RelativeTo = Enum.ActuatorRelativeTo.World
 	linearVelocity.Parent = rootPart
 
-	-- AlignOrientation for rotation (replaces BodyGyro)
 	local alignOrientation = Instance.new("AlignOrientation")
 	alignOrientation.Name = "FlightGyro"
 	alignOrientation.Attachment0 = attachment
@@ -337,6 +350,10 @@ function DragonSpawner.spawn(player: Player, dragonId: string): Model
 	alignOrientation.Responsiveness = 20
 	alignOrientation.CFrame = CFrame.new(spawnPos)
 	alignOrientation.Parent = rootPart
+
+	-- Character assignment LAST: client receives complete model with constraints
+	-- already attached, so FlightController.Heartbeat sees them on first tick.
+	player.Character = model
 
 	return model
 end
