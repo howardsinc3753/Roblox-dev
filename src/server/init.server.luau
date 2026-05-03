@@ -16,23 +16,16 @@ local RoundManager = require(script.RoundManager)
 local DragonSpawner = require(script.DragonSpawner)
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 local ArenaBuilder = require(script.ArenaBuilder)
-local LairBuilder = require(script.LairBuilder)
 local NPCManager = require(script.NPCManager)
 local RateLimiter = require(script.RateLimiter)
+-- Sprint 5 Part A: Lair integration backed out. The LairBuilder.luau file
+-- is still in src/server/ for reference but is NOT required or invoked here
+-- until we diagnose what was breaking the game. Re-enable in a future commit
+-- after error is identified and fixed.
 
 print("[Server] Dragon Warz server starting...")
 
--- Build the arena (combat zone) and lair (safe hub). Both static — built
--- once at server start. Sprint 5 Part E adds the portal Touched handlers
--- that teleport players between them.
 ArenaBuilder.build()
--- Defensive pcall: if LairBuilder errors, the rest of server init (remote
--- handlers, PlayerAdded, etc.) still runs so the game stays playable. The
--- error is logged so we can diagnose. Remove the pcall once Lair is stable.
-local lairOk, lairErr = pcall(LairBuilder.build)
-if not lairOk then
-	warn(`[Server] LairBuilder.build failed — game running without Lair: {lairErr}`)
-end
 
 -- Helper to get a remote
 local function getRemote(name: string): RemoteEvent
