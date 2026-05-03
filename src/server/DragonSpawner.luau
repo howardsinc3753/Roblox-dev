@@ -181,6 +181,25 @@ local function buildDragonModel(dragonId: string, player: Player): Model
 	fillCorner.Parent = healthFill
 
 	model.PrimaryPart = body
+
+	-- Wire the overhead health bar to the Humanoid. Humanoid.HealthChanged
+	-- fires every time CombatManager.applyDamage runs syncHealthToHumanoid.
+	-- Without this hookup, the Fill stays at 100% forever and kids can't
+	-- tell when other players are getting low on HP (NPC health bars work
+	-- because NPCManager.applyDamage updates them directly in code).
+	-- Color shifts green→yellow→red so the bar reads at a glance.
+	humanoid.HealthChanged:Connect(function(newHealth: number)
+		local pct = math.clamp(newHealth / humanoid.MaxHealth, 0, 1)
+		healthFill.Size = UDim2.fromScale(pct, 1)
+		if pct > 0.5 then
+			healthFill.BackgroundColor3 = Color3.fromRGB(50, 200, 50) -- green
+		elseif pct > 0.25 then
+			healthFill.BackgroundColor3 = Color3.fromRGB(255, 200, 50) -- yellow
+		else
+			healthFill.BackgroundColor3 = Color3.fromRGB(255, 50, 50) -- red
+		end
+	end)
+
 	return model
 end
 

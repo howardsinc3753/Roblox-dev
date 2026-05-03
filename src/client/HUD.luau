@@ -769,4 +769,122 @@ function HUD.dismissShieldHint()
 	shieldTutorialShown = true -- mark seen even if it never rendered
 end
 
+-- ============================================================================
+-- DEATH OVERLAY
+-- ============================================================================
+-- Full-screen "YOU DIED" feedback shown when the local player gets KO'd.
+-- Without this, kids couldn't tell they died — the camera kept floating, the
+-- HUD stayed up, and the only signal was a small "Eliminated! Respawning..."
+-- text in the top-center which they didn't notice in combat chaos.
+--
+-- Components:
+--   - Red full-screen tint (40% transparent, fades to 70% over 5s)
+--   - Big "YOU DIED" text (gold, scaling down/up a bit for impact)
+--   - "Killed by <name>" subtitle so they know who got them
+--   - "Respawning in N..." countdown that ticks every second
+--   - Auto-clears after `duration` seconds
+local deathOverlayGui: ScreenGui? = nil
+
+function HUD.showDeathOverlay(killerName: string, duration: number)
+	-- Tear down any prior overlay (rapid-fire deaths possible during a wipe)
+	if deathOverlayGui then
+		deathOverlayGui:Destroy()
+		deathOverlayGui = nil
+	end
+
+	deathOverlayGui = Instance.new("ScreenGui")
+	(deathOverlayGui :: ScreenGui).Name = "DeathOverlay"
+	(deathOverlayGui :: ScreenGui).ResetOnSpawn = false
+	(deathOverlayGui :: ScreenGui).IgnoreGuiInset = true
+	(deathOverlayGui :: ScreenGui).DisplayOrder = 14 -- above HUD (5), below RoundEndSummary (12)... wait, above it
+	(deathOverlayGui :: ScreenGui).Parent = playerGui
+
+	-- Full-screen red tint
+	local tint = Instance.new("Frame")
+	tint.Size = UDim2.fromScale(1, 1)
+	tint.BackgroundColor3 = Color3.fromRGB(140, 0, 0)
+	tint.BackgroundTransparency = 0.6
+	tint.BorderSizePixel = 0
+	tint.Parent = deathOverlayGui
+
+	-- Big "YOU DIED" banner — gold on red reads as "this is bad and important"
+	local banner = Instance.new("TextLabel")
+	banner.Name = "Banner"
+	banner.AnchorPoint = Vector2.new(0.5, 0.5)
+	banner.Position = UDim2.fromScale(0.5, 0.4)
+	banner.Size = UDim2.fromScale(0.6, 0.18)
+	banner.BackgroundTransparency = 1
+	banner.Text = "YOU DIED"
+	banner.TextColor3 = Color3.fromRGB(255, 215, 0)
+	banner.TextStrokeTransparency = 0
+	banner.Font = Enum.Font.GothamBlack
+	banner.TextScaled = true
+	banner.Parent = deathOverlayGui
+
+	-- Killer name — kids want to know "what got me?"
+	local killerLine = Instance.new("TextLabel")
+	killerLine.AnchorPoint = Vector2.new(0.5, 0.5)
+	killerLine.Position = UDim2.fromScale(0.5, 0.55)
+	killerLine.Size = UDim2.fromScale(0.5, 0.06)
+	killerLine.BackgroundTransparency = 1
+	killerLine.Text = `Killed by {killerName}`
+	killerLine.TextColor3 = Color3.fromRGB(255, 200, 200)
+	killerLine.TextStrokeTransparency = 0
+	killerLine.Font = Enum.Font.GothamBold
+	killerLine.TextScaled = true
+	killerLine.Parent = deathOverlayGui
+
+	-- Respawn countdown that ticks every second so kids see time progressing
+	local countdown = Instance.new("TextLabel")
+	countdown.Name = "Countdown"
+	countdown.AnchorPoint = Vector2.new(0.5, 0.5)
+	countdown.Position = UDim2.fromScale(0.5, 0.65)
+	countdown.Size = UDim2.fromScale(0.4, 0.08)
+	countdown.BackgroundTransparency = 1
+	countdown.Text = `Respawning in {duration}...`
+	countdown.TextColor3 = Color3.new(1, 1, 1)
+	countdown.TextStrokeTransparency = 0
+	countdown.Font = Enum.Font.GothamBold
+	countdown.TextScaled = true
+	countdown.Parent = deathOverlayGui
+
+	-- Tick the countdown text every second
+	local generation = (deathOverlayGui :: ScreenGui):GetAttribute("Generation") or 0
+	generation += 1
+	(deathOverlayGui :: ScreenGui):SetAttribute("Generation", generation)
+	task.spawn(function()
+		for remaining = duration - 1, 0, -1 do
+			task.wait(1)
+			-- Bail if a newer overlay replaced us (rapid-respawn edge case)
+			if not deathOverlayGui or deathOverlayGui:GetAttribute("Generation") ~= generation then
+				return
+			end
+			if remaining > 0 then
+				countdown.Text = `Respawning in {remaining}...`
+			else
+				countdown.Text = "Respawning..."
+			end
+		end
+	end)
+
+	-- Pulse the YOU DIED banner so it draws the eye even mid-respawn
+	task.spawn(function()
+		local startTick = tick()
+		while deathOverlayGui and deathOverlayGui:GetAttribute("Generation") == generation do
+			local elapsed = tick() - startTick
+			local pulse = (math.sin(elapsed * math.pi * 2) + 1) * 0.5 -- 0..1
+			banner.TextTransparency = pulse * 0.3
+			task.wait(0.05)
+		end
+	end)
+
+	-- Auto-clear after duration
+	task.delay(duration, function()
+		if deathOverlayGui and deathOverlayGui:GetAttribute("Generation") == generation then
+			deathOverlayGui:Destroy()
+			deathOverlayGui = nil
+		end
+	end)
+end
+
 return HUD

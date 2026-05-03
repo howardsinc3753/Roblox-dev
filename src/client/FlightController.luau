@@ -15,6 +15,11 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+-- ContextActionService runs BEFORE Roblox's default character controller.
+-- We need it for ButtonA boost on console because the PlayerModule otherwise
+-- consumes ButtonA as the character jump action. UserInputService.InputBegan
+-- never fires for ButtonA when a Humanoid is present, even with JumpPower=0.
+local ContextActionService = game:GetService("ContextActionService")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 
@@ -129,10 +134,12 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 	if input.KeyCode == Enum.KeyCode.LeftShift then moveDown = true end
 	if input.KeyCode == Enum.KeyCode.Q then boosting = true end
 
-	-- Gamepad — Roblox auto-maps Xbox enums to PS5 buttons at runtime
+	-- Gamepad — Roblox auto-maps Xbox enums to PS5 buttons at runtime.
+	-- ButtonA is handled separately via ContextActionService (see below)
+	-- because Roblox's PlayerModule consumes it for character jump before
+	-- UserInputService.InputBegan ever fires.
 	if input.KeyCode == Enum.KeyCode.ButtonR1 then gamepadAscend = true end
 	if input.KeyCode == Enum.KeyCode.ButtonL1 then gamepadDescend = true end
-	if input.KeyCode == Enum.KeyCode.ButtonA then gamepadBoost = true end
 end)
 
 UserInputService.InputEnded:Connect(function(input: InputObject)
@@ -146,8 +153,30 @@ UserInputService.InputEnded:Connect(function(input: InputObject)
 
 	if input.KeyCode == Enum.KeyCode.ButtonR1 then gamepadAscend = false end
 	if input.KeyCode == Enum.KeyCode.ButtonL1 then gamepadDescend = false end
-	if input.KeyCode == Enum.KeyCode.ButtonA then gamepadBoost = false end
 end)
+
+-- ContextActionService binding for ButtonA boost. CAS fires BEFORE the
+-- PlayerModule's character controller, and returning Sink prevents Roblox
+-- from also processing it as a jump. We translate the CAS state events
+-- (Begin/End/Cancel) to our existing gamepadBoost flag so the rest of the
+-- controller doesn't need to know about CAS.
+ContextActionService:BindAction(
+	"DragonWarz_BoostHold",
+	function(_actionName: string, state: Enum.UserInputState, _input: InputObject)
+		if state == Enum.UserInputState.Begin then
+			gamepadBoost = true
+		elseif state == Enum.UserInputState.End or state == Enum.UserInputState.Cancel then
+			gamepadBoost = false
+		end
+		-- Sink so Roblox PlayerModule doesn't ALSO interpret ButtonA as jump.
+		-- Without this the input would still work (we'd get Begin), but the
+		-- character would also try to jump, causing weird physics interactions
+		-- with our LinearVelocity-driven flight.
+		return Enum.ContextActionResult.Sink
+	end,
+	false, -- createTouchButton: no, MobileControls renders its own boost button
+	Enum.KeyCode.ButtonA
+)
 
 -- Thumbstick is reported via InputChanged; we cache the latest Vector2 and
 -- read it during the heartbeat. Roblox emits this every time the stick value

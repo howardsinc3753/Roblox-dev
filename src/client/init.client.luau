@@ -355,6 +355,11 @@ playerKORemote.OnClientEvent:Connect(function(killerUserId: number, victimUserId
 		HUD.updateRoundTimer("Eliminated! Respawning in 5s...")
 		FlightController.disable()
 		CombatInput.disable()
+		-- Big death feedback: full-screen red overlay + "YOU DIED" banner +
+		-- explosion sound + respawn countdown. Without this, kids couldn't
+		-- tell whether they died or just lost camera control.
+		HUD.showDeathOverlay(killerName, 5)
+		SoundManager.play("KO") -- second hit on KO sound for emphasis on the local death
 
 		task.delay(5, function()
 			FlightController.enable()
