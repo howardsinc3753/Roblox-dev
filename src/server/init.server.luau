@@ -204,13 +204,25 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 	if not character or not character.PrimaryPart then return end
 	local pos = character.PrimaryPart.Position
 
+	-- Body's facing direction (server-authoritative; matches camera direction
+	-- since FlightController orients body to camera). Used by forward-cone
+	-- specials so the panic-button sweeps in front of the dragon.
+	local forward = character.PrimaryPart.CFrame.LookVector
+
 	if dragon.element == "Fire" then
-		-- Fireball Burst: AoE damage around the player
-		local nearby = CombatManager.findPlayersInRadius(pos, 40, player)
-		for _, target in nearby do
-			CombatManager.recordDamageDealt(player) -- pause caster's HP regen
-			local killed, _ = CombatManager.applyDamage(target, dragon.damage * 2)
-			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage * 2, pos)
+		-- Fire Vortex: 90-degree forward cone of flame, 60 stud range. Hits
+		-- everything (players + NPCs) in the swath. Replaces the old AoE-around-
+		-- self behavior — feels like a real panic-button now instead of a
+		-- self-centered burst.
+		local FIRE_CONE_RANGE = 60
+		local FIRE_CONE_DOT = 0.7 -- ~45-degree half-angle = 90 deg cone
+		local fireDmg = dragon.damage * 2
+
+		local conePlayers = CombatManager.findPlayersInCone(pos, forward, FIRE_CONE_RANGE, FIRE_CONE_DOT, player)
+		for _, target in conePlayers do
+			CombatManager.recordDamageDealt(player)
+			local killed, _ = CombatManager.applyDamage(target, fireDmg)
+			damagePlayerRemote:FireAllClients(target.UserId, fireDmg, pos)
 			if killed then
 				RoundManager.recordKill(player, target)
 				DataManager.addCoins(player, 10)
@@ -225,21 +237,35 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 				end)
 			end
 		end
-		specialEffectRemote:FireAllClients(player.UserId, "Fire", pos)
+
+		-- Same cone hits NPCs. The user is playing solo with PvE NPCs as the
+		-- main threat — specials would feel pointless if they didn't sweep them.
+		local coneNPCs = CombatManager.findNPCsInCone(NPCManager.getAlive(), pos, forward, FIRE_CONE_RANGE, FIRE_CONE_DOT)
+		for _, npc in coneNPCs do
+			CombatManager.recordDamageDealt(player)
+			NPCManager.applyDamage(npc.id, fireDmg, player.UserId)
+			damageNPCRemote:FireClient(player, npc.model, fireDmg)
+		end
+
+		-- 4th arg = direction. Client renders the vortex VFX as a forward cone.
+		specialEffectRemote:FireAllClients(player.UserId, "Fire", pos, forward)
 
 	elseif dragon.element == "Ice" then
 		-- Ice Wall: temporary shield — heal self 40 HP
 		CombatManager.healPlayer(player, 40)
-		specialEffectRemote:FireAllClients(player.UserId, "Ice", pos)
+		specialEffectRemote:FireAllClients(player.UserId, "Ice", pos, forward)
 
 	elseif dragon.element == "Lightning" then
-		-- Chain Lightning: hit up to 3 nearby enemies
-		local nearby = CombatManager.findPlayersInRadius(pos, 60, player)
+		-- Chain Lightning: forward cone hitting up to 3 (players or NPCs)
+		local LIGHTNING_CONE_RANGE = 70
+		local LIGHTNING_CONE_DOT = 0.7
+
 		local hitCount = 0
-		for _, target in nearby do
+		local conePlayers = CombatManager.findPlayersInCone(pos, forward, LIGHTNING_CONE_RANGE, LIGHTNING_CONE_DOT, player)
+		for _, target in conePlayers do
 			if hitCount >= 3 then break end
 			hitCount += 1
-			CombatManager.recordDamageDealt(player) -- pause caster's HP regen
+			CombatManager.recordDamageDealt(player)
 			local killed, _ = CombatManager.applyDamage(target, dragon.damage)
 			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage, pos)
 			if killed then
@@ -256,16 +282,30 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 				end)
 			end
 		end
-		specialEffectRemote:FireAllClients(player.UserId, "Lightning", pos)
+
+		-- Lightning chain extends to NPCs too. Whatever player slots aren't
+		-- filled by the 3-target cap, NPCs can take the rest.
+		if hitCount < 3 then
+			local coneNPCs = CombatManager.findNPCsInCone(NPCManager.getAlive(), pos, forward, LIGHTNING_CONE_RANGE, LIGHTNING_CONE_DOT)
+			for _, npc in coneNPCs do
+				if hitCount >= 3 then break end
+				hitCount += 1
+				CombatManager.recordDamageDealt(player)
+				NPCManager.applyDamage(npc.id, dragon.damage, player.UserId)
+				damageNPCRemote:FireClient(player, npc.model, dragon.damage)
+			end
+		end
+
+		specialEffectRemote:FireAllClients(player.UserId, "Lightning", pos, forward)
 
 	elseif dragon.element == "Earth" then
 		-- Rock Armor: +50 bonus HP
 		CombatManager.addArmor(player, 50)
-		specialEffectRemote:FireAllClients(player.UserId, "Earth", pos)
+		specialEffectRemote:FireAllClients(player.UserId, "Earth", pos, forward)
 
 	elseif dragon.element == "Dark" then
 		-- Invisibility: make character invisible for 3 seconds
-		specialEffectRemote:FireAllClients(player.UserId, "Dark", pos)
+		specialEffectRemote:FireAllClients(player.UserId, "Dark", pos, forward)
 		-- Server-side: mark temporarily untargetable
 		for _, part in character:GetDescendants() do
 			if part:IsA("BasePart") then
@@ -290,7 +330,7 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player)
 		for _, target in nearby do
 			CombatManager.healPlayer(target, 30)
 		end
-		specialEffectRemote:FireAllClients(player.UserId, "Light", pos)
+		specialEffectRemote:FireAllClients(player.UserId, "Light", pos, forward)
 	end
 end)
 

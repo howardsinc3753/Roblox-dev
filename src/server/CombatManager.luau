@@ -255,6 +255,56 @@ function CombatManager.findHitNPC(npcStates: { any }, origin: Vector3, direction
 	return closest
 end
 
+-- Cone hit detection for forward-vortex specials. Like findHitPlayer but
+-- returns ALL players in the cone (not just the closest). dotThreshold of
+-- 0.7 = ~45 degree half-angle = 90 degree full cone — wide enough to feel
+-- like a sweeping vortex, narrow enough that you have to actually face the
+-- enemy.
+function CombatManager.findPlayersInCone(origin: Vector3, direction: Vector3, range: number, dotThreshold: number, exclude: Player?): { Player }
+	local result: { Player } = {}
+	if direction.Magnitude < 0.001 then return result end
+	local dirUnit = direction.Unit
+	for _, otherPlayer in Players:GetPlayers() do
+		if otherPlayer ~= exclude then
+			local otherState = playerStates[otherPlayer.UserId]
+			if otherState and otherState.alive then
+				local character = otherPlayer.Character
+				if character and character.PrimaryPart then
+					local toTarget = character.PrimaryPart.Position - origin
+					local dist = toTarget.Magnitude
+					if dist > 0 and dist <= range then
+						local dot = toTarget.Unit:Dot(dirUnit)
+						if dot >= dotThreshold then
+							table.insert(result, otherPlayer)
+						end
+					end
+				end
+			end
+		end
+	end
+	return result
+end
+
+-- Same cone test but for NPCs. Lets specials sweep through PvE waves too.
+function CombatManager.findNPCsInCone(npcStates: { any }, origin: Vector3, direction: Vector3, range: number, dotThreshold: number): { any }
+	local result: { any } = {}
+	if direction.Magnitude < 0.001 then return result end
+	local dirUnit = direction.Unit
+	for _, npc in npcStates do
+		if npc.alive and npc.rootPart then
+			local toTarget = npc.rootPart.Position - origin
+			local dist = toTarget.Magnitude
+			if dist > 0 and dist <= range then
+				local dot = toTarget.Unit:Dot(dirUnit)
+				if dot >= dotThreshold then
+					table.insert(result, npc)
+				end
+			end
+		end
+	end
+	return result
+end
+
 -- Find all players within radius of a position
 function CombatManager.findPlayersInRadius(center: Vector3, radius: number, exclude: Player?): { Player }
 	local result: { Player } = {}

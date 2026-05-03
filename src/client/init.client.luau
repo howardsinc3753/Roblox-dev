@@ -282,34 +282,79 @@ syncTimerRemote.OnClientEvent:Connect(function(timeRemaining: number, roundNumbe
 	roundTimeRemaining = timeRemaining
 end)
 
--- Special ability visual effects
-specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: string, position: Vector3)
+-- Special ability visual effects. 4th arg `direction` is the dragon's facing
+-- direction at the moment of cast — Fire/Lightning use it to render a forward
+-- vortex/cone instead of a self-centered burst.
+specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: string, position: Vector3, direction: Vector3?)
 	SoundManager.play("Special")
 	local targetPlayer = Players:GetPlayerByUserId(userId)
 	if not targetPlayer or not targetPlayer.Character then return end
 	local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not rootPart then return end
 
-	if element == "Fire" then
-		-- Fire burst: expanding red sphere
-		local burst = Instance.new("Part")
-		burst.Shape = Enum.PartType.Ball
-		burst.Size = Vector3.new(4, 4, 4)
-		burst.Position = position
-		burst.Color = Color3.fromRGB(255, 80, 20)
-		burst.Material = Enum.Material.Neon
-		burst.Anchored = true
-		burst.CanCollide = false
-		burst.Transparency = 0.3
-		burst.Parent = game.Workspace
+	-- Fallback: if server didn't pass direction (older protocol), aim cones forward
+	-- in world space. Better than crashing.
+	local forward = direction or Vector3.new(0, 0, -1)
+	if forward.Magnitude < 0.001 then forward = Vector3.new(0, 0, -1) end
+	forward = forward.Unit
 
+	if element == "Fire" then
+		-- Fire Vortex: an elongated cone of flame extending ~50 studs forward
+		-- from the dragon. Uses a Cylinder pointed along `forward`, expanding
+		-- in radius over 0.6s, plus a fast ParticleEmitter spitting embers.
+		local vortex = Instance.new("Part")
+		vortex.Shape = Enum.PartType.Cylinder
+		vortex.Material = Enum.Material.Neon
+		vortex.Color = Color3.fromRGB(255, 100, 30)
+		vortex.Anchored = true
+		vortex.CanCollide = false
+		vortex.Transparency = 0.25
+		vortex.Massless = true
+		-- Cylinder's "length" axis is X. Rotate so X aligns with `forward`,
+		-- then offset center to be 30 studs ahead of dragon (so it doesn't
+		-- start inside the player).
+		local startCenter = position + forward * 30
+		vortex.CFrame = CFrame.lookAt(startCenter, startCenter + forward) * CFrame.Angles(0, math.rad(90), 0)
+		vortex.Size = Vector3.new(60, 4, 4) -- length 60 (along X), radius starts small
+		vortex.Parent = workspace
+
+		-- Light source so the vortex actually illuminates terrain
+		local light = Instance.new("PointLight")
+		light.Color = Color3.fromRGB(255, 140, 30)
+		light.Brightness = 4
+		light.Range = 40
+		light.Parent = vortex
+
+		-- Ember particles streaming forward
+		local attach = Instance.new("Attachment")
+		attach.Parent = vortex
+		local particles = Instance.new("ParticleEmitter")
+		particles.Texture = "rbxasset://textures/particles/fire_main.dds"
+		particles.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 220, 80)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 60, 0)),
+		})
+		particles.Size = NumberSequence.new(3, 0.5)
+		particles.Transparency = NumberSequence.new(0.2, 1)
+		particles.Lifetime = NumberRange.new(0.4, 0.8)
+		particles.Rate = 200
+		particles.Speed = NumberRange.new(40, 70)
+		particles.SpreadAngle = Vector2.new(20, 20)
+		particles.Parent = attach
+
+		-- Animate: cone widens (radius grows) + fades over 0.6s
 		task.spawn(function()
-			for i = 1, 15 do
-				task.wait(0.03)
-				burst.Size = Vector3.new(4 + i * 5, 4 + i * 5, 4 + i * 5)
-				burst.Transparency = 0.3 + (i / 15) * 0.7
+			for i = 1, 18 do
+				task.wait(0.033)
+				local r = 4 + i * 0.8 -- grows from 4 to 18 studs radius
+				local t = 0.25 + (i / 18) * 0.7
+				vortex.Size = Vector3.new(60, r, r)
+				vortex.Transparency = t
+				light.Brightness = 4 * (1 - i / 18)
 			end
-			burst:Destroy()
+			particles.Enabled = false
+			task.wait(0.5) -- let trailing embers fade
+			vortex:Destroy()
 		end)
 
 	elseif element == "Ice" then
@@ -328,24 +373,55 @@ specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: stri
 		task.delay(2, function() shield:Destroy() end)
 
 	elseif element == "Lightning" then
-		-- Lightning flash: yellow flash on nearby parts
-		local flash = Instance.new("Part")
-		flash.Shape = Enum.PartType.Ball
-		flash.Size = Vector3.new(60, 60, 60)
-		flash.Position = position
-		flash.Color = Color3.fromRGB(255, 255, 50)
-		flash.Material = Enum.Material.Neon
-		flash.Anchored = true
-		flash.CanCollide = false
-		flash.Transparency = 0.7
-		flash.Parent = game.Workspace
+		-- Lightning Cone: forward beam of crackling yellow energy. Same
+		-- elongated-cylinder pattern as Fire but tighter, brighter, with
+		-- alternating bright/dim flash cycles to read as electric.
+		local beam = Instance.new("Part")
+		beam.Shape = Enum.PartType.Cylinder
+		beam.Material = Enum.Material.Neon
+		beam.Color = Color3.fromRGB(255, 255, 80)
+		beam.Anchored = true
+		beam.CanCollide = false
+		beam.Transparency = 0.2
+		beam.Massless = true
+		local startCenter = position + forward * 35
+		beam.CFrame = CFrame.lookAt(startCenter, startCenter + forward) * CFrame.Angles(0, math.rad(90), 0)
+		beam.Size = Vector3.new(70, 3, 3)
+		beam.Parent = workspace
+
+		local light = Instance.new("PointLight")
+		light.Color = Color3.fromRGB(220, 220, 255)
+		light.Brightness = 5
+		light.Range = 50
+		light.Parent = beam
+
+		-- Sparking particles
+		local attach = Instance.new("Attachment")
+		attach.Parent = beam
+		local sparks = Instance.new("ParticleEmitter")
+		sparks.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		sparks.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 180)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 80, 255)),
+		})
+		sparks.Size = NumberSequence.new(2, 0.3)
+		sparks.Transparency = NumberSequence.new(0.1, 1)
+		sparks.Lifetime = NumberRange.new(0.2, 0.5)
+		sparks.Rate = 250
+		sparks.Speed = NumberRange.new(60, 90)
+		sparks.SpreadAngle = Vector2.new(15, 15)
+		sparks.Parent = attach
 
 		task.spawn(function()
-			for i = 1, 5 do
-				task.wait(0.05)
-				flash.Transparency = if i % 2 == 0 then 0.7 else 0.4
+			-- Flicker pattern: bright/dim alternation gives "electric" feel
+			for i = 1, 12 do
+				task.wait(0.04)
+				beam.Transparency = if i % 2 == 0 then 0.15 else 0.5
+				beam.Size = Vector3.new(70, 3 + i * 0.4, 3 + i * 0.4)
 			end
-			flash:Destroy()
+			sparks.Enabled = false
+			task.wait(0.3)
+			beam:Destroy()
 		end)
 
 	elseif element == "Earth" then
