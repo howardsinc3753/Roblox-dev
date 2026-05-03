@@ -66,6 +66,10 @@ function FlightController.getBoostPercent(): number
 	return boostMeter / BOOST_MAX
 end
 
+function FlightController.isBoosting(): boolean
+	return boosting and boostMeter > 0
+end
+
 -- Input bindings
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then return end

@@ -1,42 +1,61 @@
 --!strict
 -- Third-person camera that follows the dragon.
--- Mouse-look for aiming, smooth follow.
+-- Mouse-look for aiming, mouse wheel for zoom, FOV punch on boost.
+-- Camera direction is mouse-driven (yaw/pitch), independent of the dragon's
+-- body orientation — so velocity-tilt and wobble on the body do NOT shake
+-- the camera or affect aim.
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+
+local FlightController = require(script.Parent.FlightController)
 
 local CameraController = {}
 
 local player = Players.LocalPlayer
 local camera = game.Workspace.CurrentCamera
 
-local CAMERA_OFFSET = Vector3.new(0, 18, 32) -- higher and further back for aerial combat visibility
+-- Zoom: lerps between near and far CAMERA_OFFSET based on mouse wheel.
+local CAMERA_OFFSET_NEAR = Vector3.new(0, 4, 8) -- close third-person
+local CAMERA_OFFSET_FAR = Vector3.new(0, 18, 32) -- aerial-combat default
 local CAMERA_SENSITIVITY = 0.3
 local CAMERA_SMOOTHNESS = 0.2
+local ZOOM_SENSITIVITY = 0.1
+
+-- FOV punch: lerps to BOOST FOV while boosting, back to DEFAULT when not.
+local FOV_DEFAULT = 70
+local FOV_BOOST = 85
+local FOV_LERP_RATE = 6 -- per second (lerp factor = min(rate*dt, 1))
 
 local yaw = 0
 local pitch = -25 -- angled down so you see enemies below and ahead
+local zoomLevel = 1.0 -- 0 = nearest, 1 = furthest
 local enabled = false
 
 function CameraController.enable()
 	enabled = true
 	camera.CameraType = Enum.CameraType.Scriptable
+	camera.FieldOfView = FOV_DEFAULT
 	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
 end
 
 function CameraController.disable()
 	enabled = false
 	camera.CameraType = Enum.CameraType.Custom
+	camera.FieldOfView = FOV_DEFAULT
 	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 end
 
--- Mouse movement for look
+-- Mouse movement = look. Mouse wheel = zoom.
 UserInputService.InputChanged:Connect(function(input: InputObject)
 	if not enabled then return end
 	if input.UserInputType == Enum.UserInputType.MouseMovement then
 		yaw -= input.Delta.X * CAMERA_SENSITIVITY
 		pitch = math.clamp(pitch - input.Delta.Y * CAMERA_SENSITIVITY, -60, 60)
+	elseif input.UserInputType == Enum.UserInputType.MouseWheel then
+		-- input.Position.Z is +1 (scroll up = zoom in) or -1 (scroll down = zoom out)
+		zoomLevel = math.clamp(zoomLevel - input.Position.Z * ZOOM_SENSITIVITY, 0, 1)
 	end
 end)
 
@@ -51,20 +70,26 @@ RunService.RenderStepped:Connect(function(dt: number)
 	if not rootPart then return end
 
 	local dragonPos = rootPart.Position
-	-- Look target is slightly ahead of and below the dragon so you can see enemies in front
-	local lookAhead = rootPart.CFrame.LookVector * 10
-	local targetPos = dragonPos + lookAhead + Vector3.new(0, -3, 0)
 
-	-- Calculate camera position from yaw/pitch
+	-- Compute camera position from yaw/pitch + zoomLevel-driven offset.
+	local currentOffset = CAMERA_OFFSET_NEAR:Lerp(CAMERA_OFFSET_FAR, zoomLevel)
 	local rotation = CFrame.Angles(0, math.rad(yaw), 0) * CFrame.Angles(math.rad(pitch), 0, 0)
-	local offset = rotation:VectorToWorldSpace(CAMERA_OFFSET)
+	local offset = rotation:VectorToWorldSpace(currentOffset)
 	local cameraPos = dragonPos + offset
 
-	-- Look at the target (slightly ahead of dragon, not at it)
-	local targetCF = CFrame.new(cameraPos, targetPos)
+	-- Look ahead in the CAMERA's forward direction (mouse-driven), NOT the
+	-- dragon body's LookVector. This is the critical decoupling — it stops
+	-- body wobble/tilt from shaking the camera target.
+	local cameraForward = rotation:VectorToWorldSpace(Vector3.new(0, 0, -1))
+	local targetPos = dragonPos + cameraForward * 10
 
-	-- Smooth interpolation
+	local targetCF = CFrame.new(cameraPos, targetPos)
 	camera.CFrame = camera.CFrame:Lerp(targetCF, CAMERA_SMOOTHNESS)
+
+	-- FOV punch when boosting. Frame-rate-independent lerp.
+	local targetFOV = if FlightController.isBoosting() then FOV_BOOST else FOV_DEFAULT
+	local fovLerp = math.min(FOV_LERP_RATE * dt, 1)
+	camera.FieldOfView += (targetFOV - camera.FieldOfView) * fovLerp
 end)
 
 function CameraController.getLookDirection(): Vector3
