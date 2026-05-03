@@ -22,6 +22,7 @@ local CameraController = require(script.CameraController)
 local CombatInput = require(script.CombatInput)
 local HUD = require(script.HUD)
 local SoundManager = require(script.SoundManager)
+local DragonSelectUI = require(script.DragonSelectUI)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -30,6 +31,25 @@ CombatInput.init()
 HUD.create()
 SoundManager.init()
 SoundManager.startMusic()
+DragonSelectUI.init()
+DragonSelectUI.create()
+
+-- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
+-- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
+-- the cached PlayerData table. Wrapped in pcall + retry because remotes may not
+-- be ready at first script execution depending on join timing.
+task.spawn(function()
+	local getPlayerDataFunc = remotes:WaitForChild("GetPlayerData", 10) :: RemoteFunction?
+	if not getPlayerDataFunc then return end
+	-- Wait briefly so server's PlayerAdded handler has finished loadPlayer
+	task.wait(1)
+	local ok, data = pcall(function()
+		return getPlayerDataFunc:InvokeServer()
+	end)
+	if ok and data then
+		DragonSelectUI.updatePlayerData(data)
+	end
+end)
 
 -- Current state
 local currentDragonId = "Ember"
@@ -68,6 +88,7 @@ end)
 -- Coins updated
 updateCoinsRemote.OnClientEvent:Connect(function(coins: number)
 	HUD.updateCoins(coins)
+	DragonSelectUI.updateCoins(coins)
 	SoundManager.play("Coin")
 end)
 
@@ -131,18 +152,19 @@ playerKORemote.OnClientEvent:Connect(function(killerUserId: number, victimUserId
 	end
 end)
 
--- Round start
+-- Round start: hide dragon select, return mouse to lock-center for combat
 local roundTimeRemaining = 0
 roundStartRemote.OnClientEvent:Connect(function(roundNumber: number, duration: number)
 	roundTimeRemaining = duration
 	HUD.updateRoundTimer(`Round {roundNumber} - {duration}s`)
 	SoundManager.play("RoundStart")
+	DragonSelectUI.hide()
 	FlightController.enable()
 	CameraController.enable()
 	CombatInput.enable()
 end)
 
--- Round end
+-- Round end: show dragon select for the 15s intermission window
 roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: any)
 	local winner = Players:GetPlayerByUserId(winnerUserId)
 	local winnerName = if winner then winner.Name else "No one"
@@ -151,9 +173,10 @@ roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: 
 
 	FlightController.disable()
 	CombatInput.disable()
+	-- Note: leaving CameraController enabled so the camera still tracks during
+	-- intermission; only flight inputs and combat are gated.
 
-	-- Re-enable only when the next round starts (not after arbitrary delay)
-	-- The RoundStart event will re-enable controls
+	DragonSelectUI.show(15)
 end)
 
 -- Timer sync from server
