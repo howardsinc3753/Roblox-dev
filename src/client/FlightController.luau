@@ -43,6 +43,13 @@ local PITCH_FREQ = 5 -- rad/s, ~1.25s period
 local ROLL_AMPLITUDE = math.rad(10)
 local ROLL_FREQ = 3.5 -- rad/s, ~1.8s period
 
+-- Velocity-based body tilt: tilts the dragon BODY (not just visual) so it
+-- visibly climbs nose-up, dives nose-down, and banks into turns. This is
+-- separate from wobble — it fights the body's "always face camera" rule
+-- by adding a velocity-derived offset to the AlignOrientation target.
+local PITCH_FROM_VELOCITY = math.rad(30) -- max nose-up/down at full speed
+local ROLL_FROM_VELOCITY = math.rad(35) -- max bank angle at full lateral speed
+
 function FlightController.setDragon(dragonId: string)
 	currentDragonId = dragonId
 end
@@ -132,9 +139,24 @@ RunService.Heartbeat:Connect(function(dt: number)
 
 	linearVelocity.VectorVelocity = moveDirection * speed
 
-	-- Body orientation: face the camera direction (steady — no wobble).
-	-- Wobble lives on the MeshMotor below, not on the body itself.
+	-- Velocity-based body tilt: nose up when climbing, nose down when diving,
+	-- bank left/right when strafing. Reads the actual physics velocity to
+	-- ensure the tilt matches what the dragon is *doing*, not what the player
+	-- is *pressing* (graceful even when boost meter empties mid-input).
+	local velocity = rootPart.AssemblyLinearVelocity
+	local maxFlightSpeed = baseSpeed * BOOST_MULTIPLIER
+	local pitchFromVel = 0
+	local rollFromVel = 0
+	if maxFlightSpeed > 0 and velocity.Magnitude > 0.1 then
+		pitchFromVel = math.clamp(velocity.Y / maxFlightSpeed, -1, 1) * PITCH_FROM_VELOCITY
+		local lateralSpeed = velocity:Dot(rightVector)
+		rollFromVel = -math.clamp(lateralSpeed / maxFlightSpeed, -1, 1) * ROLL_FROM_VELOCITY
+	end
+
+	-- Body orientation: face camera direction + velocity-based tilt. Wobble
+	-- lives on the MeshMotor below, not on the body itself.
 	local targetCF = CFrame.new(rootPart.Position, rootPart.Position + lookVector)
+		* CFrame.Angles(pitchFromVel, 0, rollFromVel)
 	alignOrientation.CFrame = targetCF
 
 	-- Drive the visual wobble via MeshMotor. This rotates only the welded
