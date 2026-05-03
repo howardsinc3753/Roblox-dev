@@ -7,6 +7,13 @@
     "robloxstudio-mcp": {
       "command": "npx",
       "args": ["-y", "robloxstudio-mcp@latest"]
+    },
+    "meshy": {
+      "command": "npx",
+      "args": ["-y", "@meshy-ai/meshy-mcp-server@latest"],
+      "env": {
+        "MESHY_API_KEY": "${MESHY_API_KEY}"
+      }
     }
   }
 }

@@ -7,15 +7,17 @@ local SoundService = game:GetService("SoundService")
 local SoundManager = {}
 
 -- Roblox asset library sound IDs (free, no upload needed)
+-- Using Roblox Pro Sound Effects partnership audio (permanently public, "(SFX)" assets)
+-- and verified Creator Store audio. Old third-party IDs broke due to 2022 audio privacy update.
 local SOUNDS: { [string]: { id: string, volume: number, pitch: number } } = {
-	BreathFire = { id = "rbxassetid://5765933027", volume = 0.6, pitch = 1.2 }, -- whoosh/fire
-	Hit = { id = "rbxassetid://3932505857", volume = 0.5, pitch = 1.0 }, -- impact
-	KO = { id = "rbxassetid://5765933272", volume = 0.7, pitch = 0.8 }, -- explosion
-	Special = { id = "rbxassetid://5765933272", volume = 0.5, pitch = 1.5 }, -- power-up
-	RoundStart = { id = "rbxassetid://5765933656", volume = 0.8, pitch = 1.0 }, -- fanfare
-	RoundEnd = { id = "rbxassetid://5765933656", volume = 0.6, pitch = 0.7 }, -- lower fanfare
-	Coin = { id = "rbxassetid://5765933027", volume = 0.3, pitch = 2.0 }, -- high-pitched ding
-	WingFlap = { id = "rbxassetid://5765933027", volume = 0.15, pitch = 0.5 }, -- ambient flap
+	BreathFire = { id = "rbxassetid://9114444008", volume = 1.5, pitch = 1.2 }, -- Fire Whoosh 3 (SFX)
+	Hit = { id = "rbxassetid://9113081793", volume = 1.2, pitch = 1.0 }, -- Airy Whoosh Blast 4 (SFX)
+	KO = { id = "rbxassetid://9120705982", volume = 1.8, pitch = 0.8 }, -- Whoosh Explosion 1 (SFX)
+	Special = { id = "rbxassetid://9066114566", volume = 1.5, pitch = 1.2 }, -- 8bit explosion (SFX)
+	RoundStart = { id = "rbxassetid://9066114566", volume = 2.0, pitch = 1.5 }, -- 8bit explosion (SFX) high pitch as fanfare
+	RoundEnd = { id = "rbxassetid://9066114566", volume = 1.5, pitch = 0.7 }, -- 8bit explosion (SFX) low pitch
+	Coin = { id = "rbxassetid://9114444008", volume = 0.8, pitch = 2.5 }, -- Fire Whoosh pitched up as ding
+	WingFlap = { id = "rbxassetid://9113081793", volume = 0.5, pitch = 0.4 }, -- Airy Whoosh low pitch as flap
 }
 
 local soundInstances: { [string]: Sound } = {}

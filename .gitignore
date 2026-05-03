@@ -9,6 +9,12 @@ build/
 # Generated voiceover MP3s (regenerated from lines.json via ElevenLabs)
 voiceover/out/
 
+# Generated 3D models (large FBX/GLB files from Meshy, regenerable)
+assets/models/dragons/*.fbx
+assets/models/dragons/*.glb
+assets/models/dragons/*.obj
+assets/models/dragons/*.usdz
+
 # Roblox place files (built by Rojo, edited in Studio)
 *.rbxl
 *.rbxlx

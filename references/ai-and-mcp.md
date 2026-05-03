@@ -68,6 +68,18 @@ Worth knowing about, especially if you want the playtest agent loop ("start a pl
 
 You can run multiple. They don't conflict; Claude Code sees them as separate tool namespaces.
 
+### 4. `@meshy-ai/meshy-mcp-server` (3D asset generation)
+
+`https://www.meshy.ai/`. Not a Studio bridge — this connects Claude Code to Meshy's AI 3D generation API. Complementary to the Studio MCP servers above: Studio MCP drives the editor, Meshy MCP generates the assets.
+
+```bash
+# Already configured in .mcp.json for this project
+npx -y @meshy-ai/meshy-mcp-server@latest
+# Requires MESHY_API_KEY env var
+```
+
+Tools: `meshy_text_to_3d`, `meshy_image_to_3d`, `meshy_text_to_3d_refine`, `meshy_remesh`. See `references/assets-3d.md` for the full Meshy → Roblox pipeline.
+
 ### What MCP can and can't do
 
 **Can:**

@@ -11,12 +11,12 @@ local CameraController = {}
 local player = Players.LocalPlayer
 local camera = game.Workspace.CurrentCamera
 
-local CAMERA_OFFSET = Vector3.new(0, 8, 20) -- behind and above
+local CAMERA_OFFSET = Vector3.new(0, 18, 32) -- higher and further back for aerial combat visibility
 local CAMERA_SENSITIVITY = 0.3
-local CAMERA_SMOOTHNESS = 0.15
+local CAMERA_SMOOTHNESS = 0.2
 
 local yaw = 0
-local pitch = -10 -- slight downward angle
+local pitch = -25 -- angled down so you see enemies below and ahead
 local enabled = false
 
 function CameraController.enable()
@@ -50,14 +50,17 @@ RunService.RenderStepped:Connect(function(dt: number)
 	local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
 	if not rootPart then return end
 
-	local targetPos = rootPart.Position
+	local dragonPos = rootPart.Position
+	-- Look target is slightly ahead of and below the dragon so you can see enemies in front
+	local lookAhead = rootPart.CFrame.LookVector * 10
+	local targetPos = dragonPos + lookAhead + Vector3.new(0, -3, 0)
 
 	-- Calculate camera position from yaw/pitch
 	local rotation = CFrame.Angles(0, math.rad(yaw), 0) * CFrame.Angles(math.rad(pitch), 0, 0)
 	local offset = rotation:VectorToWorldSpace(CAMERA_OFFSET)
-	local cameraPos = targetPos + offset
+	local cameraPos = dragonPos + offset
 
-	-- Look at the target
+	-- Look at the target (slightly ahead of dragon, not at it)
 	local targetCF = CFrame.new(cameraPos, targetPos)
 
 	-- Smooth interpolation

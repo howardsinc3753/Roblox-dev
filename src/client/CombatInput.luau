@@ -137,7 +137,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 		local dragon = DragonConfig[currentDragonId]
 		if dragon then
 			createBreathEffect(origin, direction, dragon.color)
-			playQuickSound("rbxassetid://5765933027", 0.6, 1.2)
+			playQuickSound("rbxassetid://9114444008", 1.5, 1.2) -- Fire Whoosh 3 (SFX)
 		end
 	end
 

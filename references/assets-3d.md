@@ -98,9 +98,33 @@ Weaknesses:
 
 `Edit-Time Procedural Models` Studio beta. Generates parametric 3D models — number of staircase steps, height of bookshelf, count of building floors — that regenerate when attributes change. Built on a new `ProceduralModel` Instance type. Combine with Cube: AI builds a base model, parametrize it for variants.
 
-### Tripo3D / Meshy / Luma (external)
+### Meshy AI (recommended external generator — has MCP + Roblox Bridge)
 
-`https://www.tripo3d.ai/`, `https://www.meshy.ai/`, `https://lumalabs.ai/`. Web-based services. Image-to-3D and text-to-3D. Often produce better quality than Cube for hero assets, with the trade-off of being external (export FBX, follow the Blender import path above).
+`https://www.meshy.ai/`. Best external 3D generator for the Claude Code workflow because it has both an **MCP server** (Claude Code can drive it directly) and a **Roblox DCC Bridge** (uploads models straight to your Roblox Creator Hub).
+
+**MCP Server install** (already configured in this project's `.mcp.json`):
+```bash
+npx -y @meshy-ai/meshy-mcp-server@latest
+# Set MESHY_API_KEY env var
+```
+
+MCP tools available: `meshy_text_to_3d`, `meshy_image_to_3d`, `meshy_multi_image_to_3d`, `meshy_text_to_3d_refine` (add textures), `meshy_remesh` (reduce polycount).
+
+**The correct order for Roblox-bound assets**: Generate → Remesh → Texture. Remeshing first keeps the file under Roblox's 20MB upload limit.
+
+**Roblox Bridge**: In the Meshy web app, click DCC Bridge → Send to Roblox. OAuth authenticates against your Roblox account, uploads the GLB, and drops it in Creator Hub. From there: "Open in Studio" or "Copy Asset ID". Requires Pro tier.
+
+**API workflow** (what Claude Code does via MCP):
+1. `meshy_text_to_3d` with `mode: "preview"` → generates untextured preview mesh (~30s)
+2. `meshy_text_to_3d_refine` → adds PBR textures to the preview
+3. `meshy_remesh` with `target_polycount: 5000` → reduces to Roblox-safe polycount
+4. Download FBX → import into Studio via Asset Manager
+
+**Pricing**: Pro plan required. Text-to-3D preview = 20 credits, refine = varies. Check `https://docs.meshy.ai/en/api/quick-start`.
+
+### Tripo3D / Luma (other external generators)
+
+`https://www.tripo3d.ai/`, `https://lumalabs.ai/`. Similar text/image-to-3D services. No MCP integration — manual export workflow only.
 
 Workflow:
 1. Generate on the service's site. Pay attention to the topology mode (organic vs. hard surface).
