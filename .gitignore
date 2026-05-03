@@ -15,6 +15,14 @@ assets/models/dragons/*.glb
 assets/models/dragons/*.obj
 assets/models/dragons/*.usdz
 
+# Large audio source files. Final game audio is uploaded to Roblox via
+# Asset Manager and referenced by rbxassetid:// — the local source files
+# don't need to be in git. Use Git LFS if you ever need to version them.
+assets/audio/*.mp3
+assets/audio/*.wav
+assets/audio/*.ogg
+assets/audio/*.flac
+
 # Roblox place files (built by Rojo, edited in Studio)
 *.rbxl
 *.rbxlx
