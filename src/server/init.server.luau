@@ -499,6 +499,27 @@ local function npcDamagePlayer(target: Player, damage: number, source: Vector3, 
 	end
 end
 
+-- NPC AI lock-on warning. Fires LockedByEnemy to a player when an NPC
+-- acquires them as a target. Per-player rate-limit prevents 5 NPCs all
+-- locking onto you in the same tick from stacking 5 sirens. 2.5s gap
+-- between consecutive warnings for the same player feels like the right
+-- "calm down, you're already alert" cadence.
+local NPC_LOCK_WARNING_COOLDOWN = 2.5
+local lastNpcLockWarnAt: { [number]: number } = {} -- userId -> tick()
+
+NPCManager.setLockOnCallback(function(playerUserId: number, enemyName: string)
+	local now = tick()
+	local last = lastNpcLockWarnAt[playerUserId] or 0
+	if now - last < NPC_LOCK_WARNING_COOLDOWN then return end
+	lastNpcLockWarnAt[playerUserId] = now
+
+	local target = Players:GetPlayerByUserId(playerUserId)
+	if not target then return end
+	-- userId 0 in attacker slot = NPC sentinel, matches the playerKO
+	-- pattern. Client uses enemyName to display in the warning.
+	lockedByEnemyRemote:FireClient(target, 0, enemyName)
+end)
+
 -- H4 fix: pass isRoundActive into both AI and wave loops so they don't run
 -- during intermission (no wasted ticks, no spectral breath visuals during the
 -- 15s dragon-select window).

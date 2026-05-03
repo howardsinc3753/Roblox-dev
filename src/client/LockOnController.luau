@@ -42,7 +42,7 @@ local lastReportedUserId = 0
 -- Tuning. The lock cone is wider than the breath cone so lock-on is more
 -- permissive than aim — you can lock something to your side, then the aim
 -- assist pulls your breath toward it on fire.
-local LOCK_RANGE = 150 -- studs
+local LOCK_RANGE = 300 -- studs; covers full arena (NPCs spawn at radius 250)
 local LOCK_CONE_DOT = 0.5 -- ~60 deg half-angle = 120 deg cone
 local NPC_TAG = "DragonWarz_NPC"
 local RETICLE_COLOR = Color3.fromRGB(255, 80, 80)
@@ -211,6 +211,10 @@ end
 -- Locked + press = cycle to next nearest. No candidates = unlock.
 function LockOnController.onLockKeyPressed()
 	local candidates = findCandidates()
+	-- Diagnostic: confirms F handler ran AND tells us if candidates exist.
+	-- Without this it's impossible to tell whether F did nothing because
+	-- the input wasn't received vs. because no enemies were in cone+range.
+	print(`[LockOn] F pressed. Candidates in cone+range: {#candidates}`)
 	if #candidates == 0 then
 		clearLock()
 		return
@@ -218,6 +222,7 @@ function LockOnController.onLockKeyPressed()
 
 	if not currentTarget then
 		setLock(candidates[1])
+		print(`[LockOn] Locked onto {candidates[1].kind}`)
 		return
 	end
 
@@ -289,6 +294,7 @@ end
 
 function LockOnController.init()
 	ensureReticle()
+	print("[LockOn] Initialized. Press F to lock nearest enemy.")
 end
 
 return LockOnController

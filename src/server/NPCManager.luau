@@ -81,6 +81,16 @@ function NPCManager.setKillCallback(callback: (number, string, number) -> ())
 	onNpcKilledCallback = callback
 end
 
+-- Callback fired when an NPC's AI acquires a NEW player target (was nil or
+-- different player previously). Lets server warn the locked player.
+-- Rate-limiting happens on the receiver (init.server.luau) so multiple
+-- NPCs targeting the same player don't spam warnings.
+local onNpcAcquiredTargetCallback: ((playerUserId: number, enemyName: string) -> ())?
+
+function NPCManager.setLockOnCallback(callback: (number, string) -> ())
+	onNpcAcquiredTargetCallback = callback
+end
+
 -- Same loadMeshTemplate pattern as DragonSpawner. Returns a fresh clone or
 -- nil on failure (caller falls back to placeholder parts).
 local function loadMeshTemplate(enemyType: string, assetId: number): Model?
@@ -499,6 +509,12 @@ local function tickAI(damageCallback: (target: Player, damage: number, source: V
 			currentTarget = findNearestPlayer(pos, enemy.detectionRange)
 			if currentTarget then
 				state.targetUserId = currentTarget.UserId
+				-- Newly acquired target — warn the player. Receiver
+				-- rate-limits so multiple NPCs targeting the same player
+				-- don't stack into a stuttering siren.
+				if onNpcAcquiredTargetCallback then
+					onNpcAcquiredTargetCallback(currentTarget.UserId, enemy.name)
+				end
 			end
 		end
 
