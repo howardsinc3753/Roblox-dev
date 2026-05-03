@@ -107,6 +107,109 @@ function DataManager.getCoins(player: Player): number
 	return if data then data.coins else 0
 end
 
+-- ================================
+-- RETENTION (daily login + streak + first-win-of-day)
+-- ================================
+
+-- Tunables. If you tweak these, also update the comments in PlayerDataTemplate
+-- so the design intent stays documented.
+local DAILY_LOGIN_BONUS = 10 -- flat coins for first login each day
+local STREAK_BONUS_PER_DAY = 5 -- per consecutive day, capped at MAX_STREAK_FOR_BONUS
+local MAX_STREAK_FOR_BONUS = 5 -- streak day at which streak bonus caps
+local FIRST_WIN_BONUS = 50 -- "first win of the day" payout, claimed once per UTC day
+
+-- UTC day key as an integer (YYYYMMDD). Integer comparison is faster than
+-- string compare, and YYYYMMDD sorts correctly as a number too.
+-- Using `os.date("!*t", ...)` with the `!` prefix forces UTC.
+local function getDayUTC(timestamp: number?): number
+	local t = os.date("!*t", timestamp or os.time())
+	return (t.year :: number) * 10000 + (t.month :: number) * 100 + (t.day :: number)
+end
+
+-- Day distance (today - yesterday = 1, today - day-before-yesterday = 2, etc).
+-- Note: this naively diffs the YYYYMMDD integers which works ONLY when the
+-- two dates are in the same month. For cross-month/cross-year we need real
+-- date math. We use os.time({year, month, day}) to compute Unix seconds and
+-- diff in 86400-second chunks.
+local function daysBetween(earlierDay: number, laterDay: number): number
+	if earlierDay == 0 then return math.huge end -- never logged in → break streak
+	local function unpackDay(d: number)
+		local year = math.floor(d / 10000)
+		local month = math.floor((d % 10000) / 100)
+		local day = d % 100
+		return year, month, day
+	end
+	local y1, m1, d1 = unpackDay(earlierDay)
+	local y2, m2, d2 = unpackDay(laterDay)
+	-- os.time interprets table fields as LOCAL time on most platforms; for
+	-- our integer-day comparison we just need a consistent reference point,
+	-- so local time is fine as long as we use it on both sides.
+	local t1 = os.time({ year = y1, month = m1, day = d1, hour = 12, min = 0, sec = 0 } :: any)
+	local t2 = os.time({ year = y2, month = m2, day = d2, hour = 12, min = 0, sec = 0 } :: any)
+	return math.floor((t2 - t1) / 86400)
+end
+
+-- Process a player's login: update streak, grant daily bonus, populate the
+-- transient welcomeBonus field. Idempotent within a UTC day — calling twice
+-- in the same day skips the bonus the second time.
+function DataManager.processLogin(player: Player)
+	local data = cache[player.UserId]
+	if not data then return end
+
+	data.totalLogins += 1
+	local today = getDayUTC()
+	local diff = daysBetween(data.lastLoginDay, today)
+
+	if diff == 0 then
+		-- Already logged in today — no bonus, but keep welcomeBonus from earlier
+		-- if it was set this session (shouldn't normally happen, defensive)
+		return
+	elseif diff == 1 then
+		-- Logged in yesterday → streak continues
+		data.loginStreak += 1
+	else
+		-- Missed a day (or first ever login) → streak resets to 1.
+		-- MVP: zero grace. If retention data shows streak-breaks correlate with
+		-- churn, add a 1-day grace period here later.
+		data.loginStreak = 1
+	end
+
+	data.lastLoginDay = today
+
+	local streakCoins = math.min(data.loginStreak, MAX_STREAK_FOR_BONUS) * STREAK_BONUS_PER_DAY
+	local totalCoins = DAILY_LOGIN_BONUS + streakCoins
+	data.coins += totalCoins
+
+	-- firstWinAvailable: true if they haven't claimed today's first-win bonus yet.
+	-- Used by the welcome banner to tease the next reward in the same flow.
+	local firstWinAvailable = data.lastWinDay ~= today
+
+	data.welcomeBonus = {
+		streak = data.loginStreak,
+		dailyCoins = DAILY_LOGIN_BONUS,
+		streakCoins = streakCoins,
+		totalCoins = totalCoins,
+		firstWinAvailable = firstWinAvailable,
+	}
+
+	print(`[DataManager] {player.Name} login: streak={data.loginStreak}, +{totalCoins} coins`)
+end
+
+-- Claim the first-win-of-day bonus. Returns (claimed: boolean, bonus: number).
+-- Server calls this when a round ends and there's a winner.
+function DataManager.claimFirstWin(player: Player): (boolean, number)
+	local data = cache[player.UserId]
+	if not data then return false, 0 end
+	local today = getDayUTC()
+	if data.lastWinDay == today then
+		return false, 0 -- already claimed today
+	end
+	data.lastWinDay = today
+	data.coins += FIRST_WIN_BONUS
+	print(`[DataManager] {player.Name} claimed first-win-of-day bonus +{FIRST_WIN_BONUS}`)
+	return true, FIRST_WIN_BONUS
+end
+
 -- Auto-save all online players periodically
 function DataManager.startAutoSave()
 	task.spawn(function()

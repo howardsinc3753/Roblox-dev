@@ -186,7 +186,15 @@ end
 
 -- scoreboard: { { userId, name, kills, deaths }, ... } sorted desc by kills
 -- coinsEarned: { [userId]: number } per-player end-of-round payout
-function RoundEndSummary.show(winnerUserId: number, scoreboard: { any }, coinsEarned: { [number]: number }?)
+-- firstWinClaimed: { [userId]: boolean } true if THIS player just claimed their
+--   first-win-of-day bonus this round. Lets the local player see a gold
+--   "FIRST WIN TODAY +50" line as the daily-bonus payoff moment.
+function RoundEndSummary.show(
+	winnerUserId: number,
+	scoreboard: { any },
+	coinsEarned: { [number]: number }?,
+	firstWinClaimed: { [number]: boolean }?
+)
 	if not screenGui then return end
 
 	-- Winner banner
@@ -222,7 +230,16 @@ function RoundEndSummary.show(winnerUserId: number, scoreboard: { any }, coinsEa
 		end
 	end
 	local myCoins = if coinsEarned then (coinsEarned[player.UserId] or 0) else 0
-	personalStatsLabel.Text = `You: {myKills} kills, {myDeaths} deaths\n+{myCoins} coins earned`
+	local iClaimedFirstWin = firstWinClaimed and firstWinClaimed[player.UserId] == true
+	if iClaimedFirstWin then
+		-- Gold-tinted line + bigger font weight emphasis. The +50 is already
+		-- baked into myCoins so no double-counting.
+		personalStatsLabel.Text = `You: {myKills} kills, {myDeaths} deaths\n+{myCoins} coins earned  🏆 FIRST WIN TODAY!`
+		personalStatsLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	else
+		personalStatsLabel.Text = `You: {myKills} kills, {myDeaths} deaths\n+{myCoins} coins earned`
+		personalStatsLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	end
 
 	screenGui.Enabled = true
 

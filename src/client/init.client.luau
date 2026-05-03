@@ -27,6 +27,7 @@ local DragonSelectUI = require(script.DragonSelectUI)
 local RoundEndSummary = require(script.RoundEndSummary)
 local LockOnController = require(script.LockOnController)
 local Awareness = require(script.Awareness)
+local WelcomeBanner = require(script.WelcomeBanner)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -40,6 +41,7 @@ DragonSelectUI.create()
 RoundEndSummary.create()
 LockOnController.init()
 Awareness.create()
+WelcomeBanner.create()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
@@ -55,6 +57,14 @@ task.spawn(function()
 	end)
 	if ok and data then
 		DragonSelectUI.updatePlayerData(data)
+		-- Retention: show welcome banner with daily login bonus + streak.
+		-- Server populated welcomeBonus in DataManager.processLogin. Banner
+		-- self-throttles to once-per-session via internal flag.
+		if data.welcomeBonus then
+			WelcomeBanner.show(data.welcomeBonus)
+		end
+		-- HUD streak indicator updates every time data refreshes (cheap).
+		HUD.setStreak(data.loginStreak or 0)
 	end
 end)
 
@@ -341,7 +351,10 @@ end)
 
 -- Round end: show summary first, then dragon select for the rest of intermission.
 -- Server now sends a third arg (coinsEarned per userId) for the personal payout.
-roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: any, coinsEarned: any)
+-- 4th arg `firstWinClaimed` is { [userId]: true } for players who just claimed
+-- their first-win-of-day bonus this round. Drives the gold "FIRST WIN TODAY"
+-- highlight in the summary card.
+roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: any, coinsEarned: any, firstWinClaimed: any)
 	local winner = Players:GetPlayerByUserId(winnerUserId)
 	local winnerName = if winner then winner.Name else "No one"
 	HUD.updateRoundTimer(`Round Over! Winner: {winnerName}`)
@@ -352,7 +365,7 @@ roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: 
 
 	-- Show summary first (auto-dismisses after ~6s), then open dragon select
 	-- for the remaining intermission time.
-	RoundEndSummary.show(winnerUserId, scoreboard, coinsEarned)
+	RoundEndSummary.show(winnerUserId, scoreboard, coinsEarned, firstWinClaimed)
 	task.delay(6, function()
 		DragonSelectUI.show(9) -- ~9s left of the 15s intermission after summary
 	end)

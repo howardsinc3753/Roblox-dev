@@ -18,6 +18,7 @@ local healthFill: Frame
 local boostBar: Frame
 local boostFill: Frame
 local coinLabel: TextLabel
+local streakLabel: TextLabel -- "🔥 N" tucked below the coin counter
 local roundTimerLabel: TextLabel
 local killFeedFrame: Frame
 local breathCooldownFrame: Frame
@@ -148,6 +149,26 @@ function HUD.create()
 	local coinCorner = Instance.new("UICorner")
 	coinCorner.CornerRadius = UDim.new(0, 8)
 	coinCorner.Parent = coinLabel
+
+	-- === STREAK INDICATOR (just under coins) ===
+	-- Small "🔥 N" badge so kids see their daily streak at a glance and
+	-- feel pressure to not break it. Hidden by default; setStreak shows it.
+	streakLabel = Instance.new("TextLabel")
+	streakLabel.Name = "Streak"
+	streakLabel.Size = UDim2.fromOffset(80, 24)
+	streakLabel.Position = UDim2.new(1, -210, 0, 54)
+	streakLabel.BackgroundColor3 = Color3.fromRGB(40, 25, 20)
+	streakLabel.BackgroundTransparency = 0.3
+	streakLabel.TextColor3 = Color3.fromRGB(255, 140, 50)
+	streakLabel.Text = "🔥 0"
+	streakLabel.Font = Enum.Font.GothamBold
+	streakLabel.TextScaled = true
+	streakLabel.Visible = false
+	streakLabel.Parent = screenGui
+
+	local streakCorner = Instance.new("UICorner")
+	streakCorner.CornerRadius = UDim.new(0, 6)
+	streakCorner.Parent = streakLabel
 
 	-- === ROUND TIMER (top center) ===
 	roundTimerLabel = Instance.new("TextLabel")
@@ -341,6 +362,17 @@ function HUD.updateCoins(coins: number)
 	if coinLabel then
 		coinLabel.Text = `{coins} coins`
 	end
+end
+
+-- Show / update the streak badge. Pass 0 to hide it (fresh accounts).
+function HUD.setStreak(days: number)
+	if not streakLabel then return end
+	if days <= 0 then
+		streakLabel.Visible = false
+		return
+	end
+	streakLabel.Visible = true
+	streakLabel.Text = `🔥 {days}`
 end
 
 function HUD.updateRoundTimer(text: string)
