@@ -282,7 +282,11 @@ function Awareness.updateCompass()
 		if model.PrimaryPart and model.Parent then
 			local pos = model.PrimaryPart.Position
 			table.insert(candidates, {
-				id = `npc_{model:GetDebugId()}`,
+				-- Was model:GetDebugId() — that's plugin-only now (Roblox capability
+			-- restriction). Model.Name includes the NPCManager id suffix
+			-- (e.g., "Wraith Scout_3") which is unique per spawn, so it
+			-- works as a stable identifier without needing GetDebugId.
+			id = `npc_{model.Name}`,
 				position = pos,
 				color = Color3.fromRGB(255, 140, 0),
 				distance = (pos - localPos).Magnitude,
