@@ -9,6 +9,7 @@ local TweenService = game:GetService("TweenService")
 
 local SoundService = game:GetService("SoundService")
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+local LockOnController = require(script.Parent.LockOnController)
 
 local CombatInput = {}
 
@@ -287,9 +288,26 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 		local origin = character.PrimaryPart.Position + camera.CFrame.LookVector * 5
 		local direction = camera.CFrame.LookVector
 
+		-- Aim assist: if a target is locked AND within ~30deg of camera,
+		-- snap firing direction to point exactly at target. Casual aim help
+		-- without bypassing skill — you still have to roughly aim. Server
+		-- still validates the resulting direction with its own cone test,
+		-- so this is safe (can't be exploited to fire backward).
+		local lockedTarget = LockOnController.getLockedTarget()
+		if lockedTarget and lockedTarget.rootPart and lockedTarget.rootPart.Parent then
+			local toTarget = lockedTarget.rootPart.Position - origin
+			if toTarget.Magnitude > 0.001 then
+				local targetDir = toTarget.Unit
+				-- 0.866 = cos(30deg). Within that, snap. Outside, use camera as-is.
+				if direction:Dot(targetDir) > 0.866 then
+					direction = targetDir
+				end
+			end
+		end
+
 		lastBreathTime = tick()
 
-		-- Send to server
+		-- Send to server (aim-assisted direction, server cone-tests it)
 		if fireBreathRemote then
 			fireBreathRemote:FireServer(origin, direction)
 		end
