@@ -18,6 +18,45 @@
 -- - Portal-to-Arena disc (Sprint 5 Part E adds the Touched teleport handler)
 
 local CollectionService = game:GetService("CollectionService")
+local InsertService = game:GetService("InsertService")
+
+-- Hero asset: crystal tower (Meshy AI generated) for the central pillar.
+-- Falls back to programmatic stacked-cubes if the asset fails to load.
+local CRYSTAL_TOWER_ASSET = 72162270981514
+
+-- Same load-and-place helper pattern as ArenaBuilder. Inlined here rather
+-- than shared because two duplications is acceptable; refactor to a
+-- shared MeshLoader module if a third caller appears.
+local function loadHeroPiece(assetId: number, targetCFrame: CFrame, scale: number?): Model?
+	local ok, result = pcall(function()
+		return InsertService:LoadAsset(assetId)
+	end)
+	if not ok or not result then
+		warn(`[LairBuilder] Failed to load hero asset {assetId}: {result}`)
+		return nil
+	end
+	local container = result :: Model
+	local model: Model = container
+	for _, child in container:GetChildren() do
+		if child:IsA("Model") then
+			model = child :: Model
+			break
+		end
+	end
+	local cloned = model:Clone()
+	container:Destroy()
+	if scale then
+		cloned:ScaleTo(scale)
+	end
+	cloned:PivotTo(targetCFrame)
+	for _, descendant in cloned:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			descendant.CanCollide = false
+		end
+	end
+	return cloned
+end
 
 local LairBuilder = {}
 
@@ -93,17 +132,45 @@ local function buildFloor(parent: Instance)
 	})
 end
 
--- Central Crystal Pillar — placeholder cube cluster. Sprint 7 swaps the
--- mesh for a Meshy-generated "fantasy crystal cluster" hero piece.
+-- Central Pillar: try Meshy AI crystal tower first; fall back to a
+-- programmatic stacked-cube cluster if asset load fails. Either way the
+-- centerpiece reads as the magical focal point of the Lair.
 local function buildCentralPillar(parent: Instance)
-	-- Three stacked cubes of decreasing size — visually reads as a crystal
-	-- formation even before the Meshy swap.
+	local pillarBase = LAIR_CENTER + Vector3.new(0, FLOOR_THICKNESS / 2, 0)
+
+	-- Hero load attempt
+	local hero = loadHeroPiece(CRYSTAL_TOWER_ASSET, CFrame.new(pillarBase), 4)
+	if hero then
+		hero.Name = "CentralCrystalTower"
+		hero.Parent = parent
+		-- Add a glow light at the pillar's apex regardless — pulls eye to
+		-- the centerpiece. Position relative to bounding box top.
+		local _meshCF, meshSize = hero:GetBoundingBox()
+		local light = Instance.new("PointLight")
+		light.Color = Color3.fromRGB(200, 180, 255)
+		light.Brightness = 5
+		light.Range = 80
+		-- Parent light to a part inside the hero — find the first BasePart
+		local hostPart: BasePart? = nil
+		for _, descendant in hero:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				hostPart = descendant :: BasePart
+				break
+			end
+		end
+		if hostPart then
+			light.Parent = hostPart
+		end
+		return
+	end
+
+	-- Fallback: 3 stacked colored cubes if the Meshy asset failed
 	local heights = { 6, 12, 24 }
 	local sizes = { 14, 10, 6 }
 	local colors = {
-		Color3.fromRGB(100, 80, 200), -- base, deep purple
-		Color3.fromRGB(180, 140, 255), -- mid, lavender
-		Color3.fromRGB(240, 220, 255), -- top, almost white-glowing
+		Color3.fromRGB(100, 80, 200),
+		Color3.fromRGB(180, 140, 255),
+		Color3.fromRGB(240, 220, 255),
 	}
 	local cumulativeHeight = FLOOR_THICKNESS / 2
 	for i = 1, 3 do
@@ -112,15 +179,13 @@ local function buildCentralPillar(parent: Instance)
 			Shape = Enum.PartType.Block,
 			Size = Vector3.new(sizes[i], heights[i], sizes[i]),
 			CFrame = CFrame.new(LAIR_CENTER + Vector3.new(0, cumulativeHeight, 0))
-				* CFrame.Angles(0, math.rad((i - 1) * 30), 0), -- slight rotation per layer
+				* CFrame.Angles(0, math.rad((i - 1) * 30), 0),
 			Color = colors[i],
 			Material = Enum.Material.Neon,
 			Transparency = 0.15,
 		})
 		cumulativeHeight += heights[i] / 2
 	end
-
-	-- Light source at the top of the pillar
 	local light = Instance.new("PointLight")
 	light.Color = Color3.fromRGB(200, 180, 255)
 	light.Brightness = 4

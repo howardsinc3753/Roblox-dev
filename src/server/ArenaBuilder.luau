@@ -3,6 +3,53 @@
 -- Creates terrain, islands, skybox, and lighting at server startup.
 
 local Lighting = game:GetService("Lighting")
+local InsertService = game:GetService("InsertService")
+
+-- Hero piece asset IDs (Meshy + Toolbox). Slot a placeholder cylinder
+-- gets replaced by one of these; falls back to the cylinder if load fails.
+local TOWER_ASSET_GUARD = 101559450428915 -- guard tower
+local TOWER_ASSET_WIZARD = 5408278132 -- wizard tower
+
+-- Loads a Roblox Model asset, scales + positions it, anchors all parts,
+-- and parents it into Workspace. Returns the cloned model or nil on
+-- failure (caller falls back to programmatic placeholder geometry).
+local function loadHeroPiece(assetId: number, targetCFrame: CFrame, scale: number?): Model?
+	local ok, result = pcall(function()
+		return InsertService:LoadAsset(assetId)
+	end)
+	if not ok or not result then
+		warn(`[ArenaBuilder] Failed to load hero asset {assetId}: {result}`)
+		return nil
+	end
+	local container = result :: Model
+	-- LoadAsset wraps the actual Model in a container Model. Find the inner
+	-- one. If the asset is a single MeshPart, the container itself works.
+	local model: Model = container
+	for _, child in container:GetChildren() do
+		if child:IsA("Model") then
+			model = child :: Model
+			break
+		end
+	end
+	local cloned = model:Clone()
+	container:Destroy()
+	if scale then
+		cloned:ScaleTo(scale)
+	end
+	cloned:PivotTo(targetCFrame)
+	for _, descendant in cloned:GetDescendants() do
+		if descendant:IsA("BasePart") then
+			descendant.Anchored = true
+			-- Towers are scenery — non-collidable so dragons can fly through
+			-- the lower body if needed (don't trap them at ground level).
+			-- Tops are still solid landmarks visually. Tune later if cover
+			-- behavior is desired.
+			descendant.CanCollide = false
+		end
+	end
+	cloned.Parent = workspace
+	return cloned
+end
 
 local ArenaBuilder = {}
 
@@ -233,43 +280,60 @@ function ArenaBuilder.build()
 	-- around, hide behind, or use as a landmark.
 	-- ============================================================
 
-	-- Sky Towers: 5 tall cylinders at varied positions + heights.
-	-- Provide vertical cover — fly behind one to break line-of-sight,
-	-- circle around the top for an attack run, etc. Each tower has
-	-- an emissive crown so it doubles as a navigation landmark.
+	-- Sky Towers: 5 vertical landmarks at varied positions + heights.
+	-- Towers 1-2 use Toolbox/Meshy hero assets (guard + wizard towers);
+	-- towers 3-5 fall back to programmatic cylinders. Hero load failures
+	-- gracefully degrade to the cylinder fallback (LoadAsset can fail in
+	-- Studio without the asset being permission-granted).
 	local towerPositions = {
-		{ pos = Vector3.new(150, 50, 0), height = 130 },
-		{ pos = Vector3.new(-160, 30, 80), height = 110 },
-		{ pos = Vector3.new(80, 60, -180), height = 150 },
-		{ pos = Vector3.new(-100, 40, -150), height = 120 },
-		{ pos = Vector3.new(180, 80, 170), height = 100 },
+		{ pos = Vector3.new(150, 0, 0), height = 130, asset = TOWER_ASSET_GUARD, scale = 8 },
+		{ pos = Vector3.new(-160, 0, 80), height = 110, asset = TOWER_ASSET_WIZARD, scale = 8 },
+		{ pos = Vector3.new(80, 60, -180), height = 150, asset = nil },
+		{ pos = Vector3.new(-100, 40, -150), height = 120, asset = nil },
+		{ pos = Vector3.new(180, 80, 170), height = 100, asset = nil },
 	}
 	for i, tower in towerPositions do
-		local body = Instance.new("Part")
-		body.Name = `SkyTower_{i}_Body`
-		body.Shape = Enum.PartType.Cylinder
-		body.Size = Vector3.new(tower.height, 22, 22)
-		body.CFrame = CFrame.new(tower.pos + Vector3.new(0, tower.height / 2, 0))
-			* CFrame.Angles(0, 0, math.rad(90))
-		body.Color = Color3.fromRGB(80, 75, 90)
-		body.Material = Enum.Material.Slate
-		body.Anchored = true
-		body.CanCollide = true
-		body.Parent = game.Workspace
+		local heroLoaded = false
+		if tower.asset then
+			local hero = loadHeroPiece(
+				tower.asset,
+				CFrame.new(tower.pos),
+				tower.scale
+			)
+			if hero then
+				hero.Name = `SkyTower_{i}_Hero`
+				heroLoaded = true
+			end
+		end
 
-		-- Emissive crown ring at the top — landmark in flight
-		local crown = Instance.new("Part")
-		crown.Name = `SkyTower_{i}_Crown`
-		crown.Shape = Enum.PartType.Cylinder
-		crown.Size = Vector3.new(3, 28, 28)
-		crown.CFrame = CFrame.new(tower.pos + Vector3.new(0, tower.height + 1, 0))
-			* CFrame.Angles(0, 0, math.rad(90))
-		crown.Color = Color3.fromRGB(255, 200, 80)
-		crown.Material = Enum.Material.Neon
-		crown.Transparency = 0.2
-		crown.Anchored = true
-		crown.CanCollide = false
-		crown.Parent = game.Workspace
+		if not heroLoaded then
+			-- Fallback cylinder body
+			local body = Instance.new("Part")
+			body.Name = `SkyTower_{i}_Body`
+			body.Shape = Enum.PartType.Cylinder
+			body.Size = Vector3.new(tower.height, 22, 22)
+			body.CFrame = CFrame.new(tower.pos + Vector3.new(0, tower.height / 2, 0))
+				* CFrame.Angles(0, 0, math.rad(90))
+			body.Color = Color3.fromRGB(80, 75, 90)
+			body.Material = Enum.Material.Slate
+			body.Anchored = true
+			body.CanCollide = true
+			body.Parent = game.Workspace
+
+			-- Emissive crown ring at the top — landmark in flight
+			local crown = Instance.new("Part")
+			crown.Name = `SkyTower_{i}_Crown`
+			crown.Shape = Enum.PartType.Cylinder
+			crown.Size = Vector3.new(3, 28, 28)
+			crown.CFrame = CFrame.new(tower.pos + Vector3.new(0, tower.height + 1, 0))
+				* CFrame.Angles(0, 0, math.rad(90))
+			crown.Color = Color3.fromRGB(255, 200, 80)
+			crown.Material = Enum.Material.Neon
+			crown.Transparency = 0.2
+			crown.Anchored = true
+			crown.CanCollide = false
+			crown.Parent = game.Workspace
+		end
 	end
 
 	-- Cloud Platforms: 10 flat disc Parts at mid-altitudes scattered
