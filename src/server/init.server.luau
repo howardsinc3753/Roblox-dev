@@ -28,7 +28,11 @@ print("[Server] Dragon Warz server starting...")
 -- previous spawnInLair(p, d) calls. The arenaSpawn helper below is
 -- used by the Lair portal Touched handler to send players into combat.
 local function spawnInLair(player: Player, dragonId: string)
-	return spawnInLair(player, dragonId, LairBuilder.getRandomSpawnPoint())
+	-- DragonSpawner.spawn (NOT spawnInLair) — the previous version recursed
+	-- because the replace-all sed caught this internal call too. Every spawn
+	-- attempt hit infinite recursion and the player got Roblox's default
+	-- spawn fallback instead of our Lair drop.
+	return DragonSpawner.spawn(player, dragonId, LairBuilder.getRandomSpawnPoint())
 end
 
 local function teleportToArena(player: Player)
