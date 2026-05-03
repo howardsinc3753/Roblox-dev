@@ -23,6 +23,7 @@ local InsertService = game:GetService("InsertService")
 -- Hero asset: crystal tower (Meshy AI generated) for the central pillar.
 -- Falls back to programmatic stacked-cubes if the asset fails to load.
 local CRYSTAL_TOWER_ASSET = 72162270981514
+local OBELISK_ASSET = 90068928485508 -- replaces Stat Stone + Shop Stone placeholders
 
 -- Same load-and-place helper pattern as ArenaBuilder. Inlined here rather
 -- than shared because two duplications is acceptable; refactor to a
@@ -295,16 +296,41 @@ local function buildPracticeDummies(parent: Instance)
 	end
 end
 
--- Stat Stone obelisk + Shop Stone obelisk. V1 visual placeholders; Sprint 7/9
--- add ProximityPrompt or Touched handlers that open the upgrade/shop UI.
+-- Stat Stone obelisk + Shop Stone obelisk. Tries to load the Roblox
+-- obelisk asset; falls back to programmatic stone Parts if load fails.
+-- Sprint 7/9 add the ProximityPrompt or Touched handlers that open the
+-- upgrade/shop UI; this part is just the visual.
 local function buildInteractionStones(parent: Instance)
 	-- Stat Stone (left of pillar)
-	local statStone = makePart("StatStone", parent, {
-		Size = Vector3.new(4, 14, 4),
-		CFrame = CFrame.new(LAIR_CENTER + Vector3.new(-50, FLOOR_THICKNESS / 2 + 7, 0)),
-		Color = Color3.fromRGB(50, 70, 110),
-		Material = Enum.Material.Slate,
-	})
+	local statPos = LAIR_CENTER + Vector3.new(-50, FLOOR_THICKNESS / 2, 0)
+	local statHero = loadHeroPiece(OBELISK_ASSET, CFrame.new(statPos), 1)
+	local statStone: BasePart
+	if statHero then
+		statHero.Name = "StatStoneHero"
+		statHero.Parent = parent
+		-- Pick a BasePart inside the hero to adornee the BillboardGui to;
+		-- runes overlay stays in its prior CFrame so it floats in front
+		-- of the hero (looks like a magical glyph hovering over the stone).
+		local anchor: BasePart? = nil
+		for _, descendant in statHero:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				anchor = descendant :: BasePart
+				break
+			end
+		end
+		statStone = anchor or makePart("StatStoneAnchor", parent, {
+			Size = Vector3.new(1, 1, 1),
+			CFrame = CFrame.new(statPos + Vector3.new(0, 7, 0)),
+			Transparency = 1,
+		})
+	else
+		statStone = makePart("StatStone", parent, {
+			Size = Vector3.new(4, 14, 4),
+			CFrame = CFrame.new(statPos + Vector3.new(0, 7, 0)),
+			Color = Color3.fromRGB(50, 70, 110),
+			Material = Enum.Material.Slate,
+		})
+	end
 	local statRunes = makePart("StatStoneRunes", parent, {
 		Size = Vector3.new(4.1, 8, 0.2),
 		CFrame = statStone.CFrame * CFrame.new(0, 0, 2.05),
@@ -327,13 +353,33 @@ local function buildInteractionStones(parent: Instance)
 	sl.TextScaled = true
 	sl.Parent = statLabel
 
-	-- Shop Stone (right of pillar)
-	local shopStone = makePart("ShopStone", parent, {
-		Size = Vector3.new(4, 14, 4),
-		CFrame = CFrame.new(LAIR_CENTER + Vector3.new(50, FLOOR_THICKNESS / 2 + 7, 0)),
-		Color = Color3.fromRGB(110, 80, 40),
-		Material = Enum.Material.Slate,
-	})
+	-- Shop Stone (right of pillar) — same obelisk asset, mirror position
+	local shopPos = LAIR_CENTER + Vector3.new(50, FLOOR_THICKNESS / 2, 0)
+	local shopHero = loadHeroPiece(OBELISK_ASSET, CFrame.new(shopPos), 1)
+	local shopStone: BasePart
+	if shopHero then
+		shopHero.Name = "ShopStoneHero"
+		shopHero.Parent = parent
+		local anchor: BasePart? = nil
+		for _, descendant in shopHero:GetDescendants() do
+			if descendant:IsA("BasePart") then
+				anchor = descendant :: BasePart
+				break
+			end
+		end
+		shopStone = anchor or makePart("ShopStoneAnchor", parent, {
+			Size = Vector3.new(1, 1, 1),
+			CFrame = CFrame.new(shopPos + Vector3.new(0, 7, 0)),
+			Transparency = 1,
+		})
+	else
+		shopStone = makePart("ShopStone", parent, {
+			Size = Vector3.new(4, 14, 4),
+			CFrame = CFrame.new(shopPos + Vector3.new(0, 7, 0)),
+			Color = Color3.fromRGB(110, 80, 40),
+			Material = Enum.Material.Slate,
+		})
+	end
 	local shopRunes = makePart("ShopStoneRunes", parent, {
 		Size = Vector3.new(4.1, 8, 0.2),
 		CFrame = shopStone.CFrame * CFrame.new(0, 0, 2.05),
