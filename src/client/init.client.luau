@@ -23,6 +23,7 @@ local CombatInput = require(script.CombatInput)
 local HUD = require(script.HUD)
 local SoundManager = require(script.SoundManager)
 local DragonSelectUI = require(script.DragonSelectUI)
+local RoundEndSummary = require(script.RoundEndSummary)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -33,6 +34,7 @@ SoundManager.init()
 SoundManager.startMusic()
 DragonSelectUI.init()
 DragonSelectUI.create()
+RoundEndSummary.create()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
@@ -164,8 +166,9 @@ roundStartRemote.OnClientEvent:Connect(function(roundNumber: number, duration: n
 	CombatInput.enable()
 end)
 
--- Round end: show dragon select for the 15s intermission window
-roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: any)
+-- Round end: show summary first, then dragon select for the rest of intermission.
+-- Server now sends a third arg (coinsEarned per userId) for the personal payout.
+roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: any, coinsEarned: any)
 	local winner = Players:GetPlayerByUserId(winnerUserId)
 	local winnerName = if winner then winner.Name else "No one"
 	HUD.updateRoundTimer(`Round Over! Winner: {winnerName}`)
@@ -173,10 +176,13 @@ roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: 
 
 	FlightController.disable()
 	CombatInput.disable()
-	-- Note: leaving CameraController enabled so the camera still tracks during
-	-- intermission; only flight inputs and combat are gated.
 
-	DragonSelectUI.show(15)
+	-- Show summary first (auto-dismisses after ~6s), then open dragon select
+	-- for the remaining intermission time.
+	RoundEndSummary.show(winnerUserId, scoreboard, coinsEarned)
+	task.delay(6, function()
+		DragonSelectUI.show(9) -- ~9s left of the 15s intermission after summary
+	end)
 end)
 
 -- Timer sync from server

@@ -297,19 +297,33 @@ RoundManager.setCallbacks(
 		updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
 	end,
 
-	-- onRoundEnd
+	-- onRoundEnd: award participation + win bonus, fire RoundEnd with per-player
+	-- coins-earned data so the client can show a "you earned X coins" summary.
 	function()
 		local winner = RoundManager.getWinner()
 		local scoreboard = RoundManager.getScoreboard()
+		local PARTICIPATION = 5
+		local WIN_BONUS = 25
+
+		-- coinsEarnedThisRound: per-userId payout for the summary screen.
+		-- Kills are already paid in real time as they happen, so this only
+		-- includes the end-of-round bonuses (participation + winner).
+		local coinsEarnedThisRound: { [number]: number } = {}
 
 		for _, player in Players:GetPlayers() do
-			DataManager.addCoins(player, 5)
+			local earned = PARTICIPATION
+			if winner and winner.UserId == player.UserId then
+				earned += WIN_BONUS
+			end
+			DataManager.addCoins(player, earned)
+			coinsEarnedThisRound[player.UserId] = earned
 			updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
 		end
 
 		roundEndRemote:FireAllClients(
 			if winner then winner.UserId else 0,
-			scoreboard
+			scoreboard,
+			coinsEarnedThisRound
 		)
 	end
 )
