@@ -17,6 +17,7 @@ local DragonSpawner = require(script.DragonSpawner)
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 local ArenaBuilder = require(script.ArenaBuilder)
 local NPCManager = require(script.NPCManager)
+local RateLimiter = require(script.RateLimiter)
 
 print("[Server] Dragon Warz server starting...")
 
@@ -93,6 +94,7 @@ end)
 
 -- Dragon selection
 selectDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unknown)
+	if not RateLimiter.check(player, "SelectDragon", 5) then return end
 	if typeof(dragonId) ~= "string" then return end
 	local id = dragonId :: string
 
@@ -110,6 +112,7 @@ end)
 
 -- Dragon unlock
 unlockDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unknown)
+	if not RateLimiter.check(player, "UnlockDragon", 2) then return end
 	if typeof(dragonId) ~= "string" then return end
 	local id = dragonId :: string
 
@@ -133,6 +136,7 @@ end)
 -- on right now" and we ping the target once. Thrash-spammy clients are
 -- self-limited because LockOnController only sends on state changes.
 lockOnTargetRemote.OnServerEvent:Connect(function(player: Player, targetUserId: unknown)
+	if not RateLimiter.check(player, "LockOnTarget", 10) then return end
 	if typeof(targetUserId) ~= "number" then return end
 	if targetUserId == 0 then return end -- 0 = unlocked, no warning needed
 	if targetUserId == player.UserId then return end -- can't lock self
@@ -146,6 +150,7 @@ end)
 -- precedence when both are in the cone, so cooperating against NPCs doesn't
 -- accidentally heal the human meta).
 fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown, direction: unknown)
+	if not RateLimiter.check(player, "FireBreath", 5) then return end
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
 	if not CombatManager.canFireBreath(player) then return end
 	if not RoundManager.isActive() then return end
@@ -157,6 +162,26 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 
 	local dragon = DragonConfig[state.dragonId]
 	if not dragon then return end
+
+	-- SECURITY: clamp client-supplied origin to within 8 studs of the player's
+	-- ACTUAL server-side position. Without this clamp, a cheater can pass
+	-- origin = victim_position + small_offset → gets full-damage point-blank
+	-- hits from across the map (cone passes, distance-falloff = 1.0).
+	-- 8 studs covers the legit ~5-stud breath-muzzle offset CombatInput uses.
+	-- If clientOrigin is bogus, we snap to the real character position so the
+	-- breath fires from where the cheater actually is — not where they claim.
+	local character = player.Character
+	if character and character.PrimaryPart then
+		local serverPos = character.PrimaryPart.Position
+		if (origin :: Vector3 - serverPos).Magnitude > 8 then
+			origin = serverPos
+		end
+	end
+
+	-- Validate direction magnitude to prevent crash from zero-length .Unit calls
+	-- and to reject obviously absurd values (cheaters passing huge vectors).
+	local dirMag = (direction :: Vector3).Magnitude
+	if dirMag < 0.01 or dirMag > 100 then return end
 
 	-- Fake projectile travel time. The client-side breath visual takes
 	-- distance/150 seconds to traverse to the target. Server applies damage
@@ -247,6 +272,7 @@ end)
 -- Client now passes camera direction (2nd arg) so cone specials aim where
 -- the player is looking, not where the body is tilted (climb/dive/bank).
 useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection: unknown)
+	if not RateLimiter.check(player, "UseSpecial", 2) then return end
 	if not CombatManager.canUseSpecial(player) then return end
 	if not RoundManager.isActive() then return end
 
