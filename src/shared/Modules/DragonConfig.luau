@@ -88,6 +88,8 @@ local Dragons: { [string]: DragonStats } = {
 		color = Color3.fromRGB(60, 20, 80),
 		secondaryColor = Color3.fromRGB(150, 50, 200),
 		cost = 200,
+		meshAssetId = 87676231942895, -- Meshy sinister/shadow dragon
+		meshScale = 4,
 	},
 	Prism = {
 		name = "Prism",
