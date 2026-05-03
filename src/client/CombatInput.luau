@@ -335,6 +335,16 @@ local function fireSpecial()
 	end
 end
 
+-- Public proxies so MobileControls (touch buttons) can trigger the same
+-- actions as the keyboard/mouse without us synthesizing fake input events.
+function CombatInput.fireBreath()
+	fireBreath()
+end
+
+function CombatInput.fireSpecial()
+	fireSpecial()
+end
+
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 	if gameProcessed then return end
 

@@ -96,6 +96,23 @@ function FlightController.isBoosting(): boolean
 	return boosting and boostMeter > 0
 end
 
+-- Touch-input setters: MobileControls writes to these from its joystick +
+-- on-screen buttons. Booleans match the keyboard handlers exactly so the
+-- downstream Heartbeat code doesn't need to know whether input came from
+-- a keyboard or a touch screen.
+function FlightController.setMovement(forward: boolean?, back: boolean?, left: boolean?, right: boolean?, up: boolean?, down: boolean?)
+	if forward ~= nil then moveForward = forward end
+	if back ~= nil then moveBack = back end
+	if left ~= nil then moveLeft = left end
+	if right ~= nil then moveRight = right end
+	if up ~= nil then moveUp = up end
+	if down ~= nil then moveDown = down end
+end
+
+function FlightController.setBoost(active: boolean)
+	boosting = active
+end
+
 -- ============================================================================
 -- INPUT BINDINGS — keyboard + gamepad in parallel
 -- ============================================================================

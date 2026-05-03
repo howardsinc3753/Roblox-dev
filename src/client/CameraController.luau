@@ -81,6 +81,15 @@ function CameraController.enable()
 	end
 end
 
+-- Public look-delta hook for touch camera-drag (MobileControls). Applies
+-- a yaw/pitch update equivalent to the mouse-movement handler so touch and
+-- mouse share the same look math + clamping.
+function CameraController.applyLookDelta(deltaX: number, deltaY: number)
+	if not enabled then return end
+	yaw -= deltaX * CAMERA_SENSITIVITY
+	pitch = math.clamp(pitch - deltaY * CAMERA_SENSITIVITY, -60, 60)
+end
+
 function CameraController.disable()
 	enabled = false
 	camera.CameraType = Enum.CameraType.Custom

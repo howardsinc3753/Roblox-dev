@@ -28,6 +28,7 @@ local RoundEndSummary = require(script.RoundEndSummary)
 local LockOnController = require(script.LockOnController)
 local Awareness = require(script.Awareness)
 local WelcomeBanner = require(script.WelcomeBanner)
+local MobileControls = require(script.MobileControls)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -42,6 +43,8 @@ RoundEndSummary.create()
 LockOnController.init()
 Awareness.create()
 WelcomeBanner.create()
+-- Touch UI for mobile (iPad/iPhone/Android). No-op on keyboard devices.
+MobileControls.init()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
@@ -65,6 +68,15 @@ task.spawn(function()
 		end
 		-- HUD streak indicator updates every time data refreshes (cheap).
 		HUD.setStreak(data.loginStreak or 0)
+	else
+		-- Single-shot fetch: if it fails, the welcome banner + streak badge
+		-- silently never render this session even though the server already
+		-- granted the daily bonus coins. Surface the failure so it's
+		-- debuggable rather than invisible — the most common cause is
+		-- server-side script error before GetPlayerData was registered.
+		-- (Future: add a bounded retry loop here if this becomes a real
+		-- player-facing issue.)
+		warn(`[Client] GetPlayerData failed; welcome banner + streak badge will not render this session. Error: {tostring(data)}`)
 	end
 end)
 
@@ -672,6 +684,15 @@ end)
 -- Hotkey handler. Tab is reserved by Roblox for the playerlist UI, so
 -- lock-on uses F (standard fighter-game key). B opens Dragon Select.
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
+	-- Diagnostic for the F-key-not-working report: prints BEFORE the
+	-- gameProcessed gate so we can tell if input is reaching us at all.
+	-- If the F line never prints when the user presses F, the key isn't
+	-- reaching this handler (likely a higher-priority binding). If it
+	-- prints with gameProcessed=true, a UI element is consuming it
+	-- (chat, leaderboard, focused TextBox, etc.).
+	if input.KeyCode == Enum.KeyCode.F then
+		print(`[Hotkey] F received. gameProcessed={gameProcessed}`)
+	end
 	if gameProcessed then return end
 	if input.KeyCode == Enum.KeyCode.B then
 		DragonSelectUI.toggle()
