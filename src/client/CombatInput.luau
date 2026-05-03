@@ -66,48 +66,209 @@ function CombatInput.getSpecialCooldownPercent(): number
 	return math.clamp(elapsed / SPECIAL_COOLDOWN, 0, 1)
 end
 
--- Create a visual breath projectile
-local function createBreathEffect(origin: Vector3, direction: Vector3, color: Color3)
+-- Element-specific breath visuals. Each entry tunes the projectile shape,
+-- color, light, and particle texture so a fireball reads as fire, an ice
+-- shard reads as ice, etc. — instead of a generic colored ball.
+type ElementVFX = {
+	shape: Enum.PartType,
+	size: Vector3,
+	color: Color3,
+	material: Enum.Material,
+	rotation: CFrame?, -- additional rotation applied to projectile (e.g., to make blocks look diamond)
+	lightColor: Color3,
+	lightBrightness: number,
+	lightRange: number,
+	particleTexture: string,
+	particleColor: ColorSequence,
+	particleRate: number,
+	particleSpeed: NumberRange,
+	particleSize: NumberSequence,
+	trailColor: ColorSequence?,
+	trailLightEmission: number,
+}
+
+local ELEMENT_VFX: { [string]: ElementVFX } = {
+	Fire = {
+		shape = Enum.PartType.Ball,
+		size = Vector3.new(2.5, 2.5, 2.5),
+		color = Color3.fromRGB(255, 120, 30),
+		material = Enum.Material.Neon,
+		lightColor = Color3.fromRGB(255, 150, 50),
+		lightBrightness = 3,
+		lightRange = 18,
+		particleTexture = "rbxasset://textures/particles/fire_main.dds",
+		particleColor = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 220, 80)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 60, 0)),
+		}),
+		particleRate = 100,
+		particleSpeed = NumberRange.new(8, 14),
+		particleSize = NumberSequence.new(2, 0.2),
+		trailLightEmission = 1,
+	},
+	Ice = {
+		shape = Enum.PartType.Block,
+		size = Vector3.new(1.8, 1.8, 3),
+		color = Color3.fromRGB(180, 230, 255),
+		material = Enum.Material.Glass,
+		rotation = CFrame.Angles(0, 0, math.rad(45)), -- diamond orientation
+		lightColor = Color3.fromRGB(150, 220, 255),
+		lightBrightness = 2,
+		lightRange = 14,
+		particleTexture = "rbxasset://textures/particles/sparkles_main.dds",
+		particleColor = ColorSequence.new(Color3.fromRGB(220, 240, 255)),
+		particleRate = 60,
+		particleSpeed = NumberRange.new(4, 8),
+		particleSize = NumberSequence.new(0.8, 0.1),
+		trailLightEmission = 0.6,
+	},
+	Lightning = {
+		shape = Enum.PartType.Ball,
+		size = Vector3.new(2, 2, 2),
+		color = Color3.fromRGB(255, 255, 100),
+		material = Enum.Material.Neon,
+		lightColor = Color3.fromRGB(220, 220, 255),
+		lightBrightness = 4,
+		lightRange = 20,
+		particleTexture = "rbxasset://textures/particles/sparkles_main.dds",
+		particleColor = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 180)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 80, 255)),
+		}),
+		particleRate = 150,
+		particleSpeed = NumberRange.new(10, 20),
+		particleSize = NumberSequence.new(1.2, 0.1),
+		trailLightEmission = 1,
+	},
+	Earth = {
+		shape = Enum.PartType.Block,
+		size = Vector3.new(2.5, 2.5, 2.5),
+		color = Color3.fromRGB(120, 80, 40),
+		material = Enum.Material.Slate,
+		rotation = CFrame.Angles(math.rad(20), math.rad(20), math.rad(20)),
+		lightColor = Color3.fromRGB(140, 100, 60),
+		lightBrightness = 1,
+		lightRange = 8,
+		particleTexture = "rbxasset://textures/particles/smoke_main.dds",
+		particleColor = ColorSequence.new(Color3.fromRGB(100, 70, 40)),
+		particleRate = 80,
+		particleSpeed = NumberRange.new(3, 6),
+		particleSize = NumberSequence.new(2, 0.5),
+		trailLightEmission = 0,
+	},
+	Dark = {
+		shape = Enum.PartType.Ball,
+		size = Vector3.new(2.5, 2.5, 2.5),
+		color = Color3.fromRGB(50, 20, 70),
+		material = Enum.Material.Neon,
+		lightColor = Color3.fromRGB(100, 30, 150),
+		lightBrightness = 2,
+		lightRange = 12,
+		particleTexture = "rbxasset://textures/particles/smoke_main.dds",
+		particleColor = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(80, 30, 120)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(20, 5, 30)),
+		}),
+		particleRate = 120,
+		particleSpeed = NumberRange.new(5, 10),
+		particleSize = NumberSequence.new(2.5, 0.5),
+		trailLightEmission = 0.3,
+	},
+	Light = {
+		shape = Enum.PartType.Ball,
+		size = Vector3.new(2.2, 2.2, 2.2),
+		color = Color3.fromRGB(255, 250, 220),
+		material = Enum.Material.Neon,
+		lightColor = Color3.fromRGB(255, 250, 200),
+		lightBrightness = 5,
+		lightRange = 22,
+		particleTexture = "rbxasset://textures/particles/sparkles_main.dds",
+		particleColor = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(255, 220, 150)),
+		}),
+		particleRate = 120,
+		particleSpeed = NumberRange.new(6, 12),
+		particleSize = NumberSequence.new(1.5, 0.2),
+		trailLightEmission = 1,
+	},
+}
+
+-- Create a visual breath projectile keyed off the dragon's element so each
+-- type reads distinctly: Ember = fireball, Frost = ice shard, Storm = electric
+-- ball, etc. Falls back to Fire styling if the element isn't in the table.
+local function createBreathEffect(origin: Vector3, direction: Vector3, element: string, color: Color3)
+	local vfx = ELEMENT_VFX[element] or ELEMENT_VFX.Fire
+
 	local projectile = Instance.new("Part")
 	projectile.Name = "BreathProjectile"
-	projectile.Size = Vector3.new(2, 2, 4)
-	projectile.Shape = Enum.PartType.Ball
-	projectile.Color = color
-	projectile.Material = Enum.Material.Neon
+	projectile.Size = vfx.size
+	projectile.Shape = vfx.shape
+	projectile.Color = vfx.color
+	projectile.Material = vfx.material
 	projectile.Anchored = true
 	projectile.CanCollide = false
-	projectile.CFrame = CFrame.new(origin, origin + direction)
-	projectile.Parent = game.Workspace
+	projectile.Massless = true
+	-- Rotate to face direction. If the element wants extra orientation
+	-- (e.g., diamond-spinning ice shard), apply that on top.
+	local baseCF = CFrame.lookAt(origin, origin + direction)
+	if vfx.rotation then
+		projectile.CFrame = baseCF * vfx.rotation
+	else
+		projectile.CFrame = baseCF
+	end
+	projectile.Parent = workspace
 
-	-- Particle trail
-	local attachment = Instance.new("Attachment")
-	attachment.Parent = projectile
+	-- Glow light so the projectile illuminates terrain as it passes
+	local light = Instance.new("PointLight")
+	light.Color = vfx.lightColor
+	light.Brightness = vfx.lightBrightness
+	light.Range = vfx.lightRange
+	light.Parent = projectile
 
+	-- Particle emitter for element-specific texture (fire, sparkles, smoke...)
+	local pAttach = Instance.new("Attachment")
+	pAttach.Parent = projectile
+	local particles = Instance.new("ParticleEmitter")
+	particles.Texture = vfx.particleTexture
+	particles.Color = vfx.particleColor
+	particles.Size = vfx.particleSize
+	particles.Transparency = NumberSequence.new(0.1, 1)
+	particles.Lifetime = NumberRange.new(0.3, 0.6)
+	particles.Rate = vfx.particleRate
+	particles.Speed = vfx.particleSpeed
+	particles.SpreadAngle = Vector2.new(15, 15)
+	particles.Parent = pAttach
+
+	-- Streaming trail behind the projectile (kept from old impl, just colored)
+	local trailAttach1 = Instance.new("Attachment")
+	trailAttach1.Position = Vector3.new(0, 0, -0.5)
+	trailAttach1.Parent = projectile
+	local trailAttach2 = Instance.new("Attachment")
+	trailAttach2.Position = Vector3.new(0, 0, 0.5)
+	trailAttach2.Parent = projectile
 	local trail = Instance.new("Trail")
-	trail.Color = ColorSequence.new(color)
+	trail.Color = vfx.trailColor or ColorSequence.new(vfx.color)
 	trail.Lifetime = 0.3
 	trail.MinLength = 0.1
-	trail.LightEmission = 1
+	trail.LightEmission = vfx.trailLightEmission
 	trail.Transparency = NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) })
-
-	local attachment2 = Instance.new("Attachment")
-	attachment2.Position = Vector3.new(0, 0, 1)
-	attachment2.Parent = projectile
-	trail.Attachment0 = attachment
-	trail.Attachment1 = attachment2
+	trail.Attachment0 = trailAttach1
+	trail.Attachment1 = trailAttach2
 	trail.Parent = projectile
 
 	-- Fly forward and destroy
 	local speed = 150
 	local distance = 100
 	local duration = distance / speed
-
 	local endPos = origin + direction.Unit * distance
 	local tween = TweenService:Create(projectile, TweenInfo.new(duration, Enum.EasingStyle.Linear), {
-		CFrame = CFrame.new(endPos, endPos + direction),
+		CFrame = CFrame.lookAt(endPos, endPos + direction) * (vfx.rotation or CFrame.new()),
 	})
 	tween:Play()
 	tween.Completed:Connect(function()
+		particles.Enabled = false
+		task.wait(0.3) -- let trailing particles fade naturally
 		projectile:Destroy()
 	end)
 end
@@ -133,10 +294,10 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 			fireBreathRemote:FireServer(origin, direction)
 		end
 
-		-- Visual effect + sound
+		-- Visual effect + sound — pass element so projectile reads as its type
 		local dragon = DragonConfig[currentDragonId]
 		if dragon then
-			createBreathEffect(origin, direction, dragon.color)
+			createBreathEffect(origin, direction, dragon.element, dragon.color)
 			playQuickSound("rbxassetid://9114444008", 1.5, 1.2) -- Fire Whoosh 3 (SFX)
 		end
 	end
