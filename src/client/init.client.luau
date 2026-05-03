@@ -366,8 +366,47 @@ end)
 -- Special ability visual effects. 4th arg `direction` is the dragon's facing
 -- direction at the moment of cast — Fire/Lightning use it to render a forward
 -- vortex/cone instead of a self-centered burst.
+-- Screen flash on local-player special cast. Brief white overlay fades out
+-- in ~0.25s. Adds the "BIG MOMENT" feel kids expect for a panic-button. Only
+-- triggers for the LOCAL player's casts (not other players') — otherwise
+-- the screen would flash every time anyone casts anywhere on the map.
+local function flashScreenWhite()
+	local flashGui = player:FindFirstChild("PlayerGui"):FindFirstChild("CastFlash") :: ScreenGui?
+	if not flashGui then
+		flashGui = Instance.new("ScreenGui")
+		flashGui.Name = "CastFlash"
+		flashGui.ResetOnSpawn = false
+		flashGui.IgnoreGuiInset = true
+		flashGui.DisplayOrder = 20 -- above all gameplay UI for the brief flash
+		flashGui.Enabled = false
+		flashGui.Parent = player:FindFirstChild("PlayerGui")
+		local flash = Instance.new("Frame")
+		flash.Name = "Flash"
+		flash.Size = UDim2.fromScale(1, 1)
+		flash.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+		flash.BorderSizePixel = 0
+		flash.BackgroundTransparency = 0
+		flash.Parent = flashGui
+	end
+	local flash = flashGui:FindFirstChild("Flash") :: Frame
+	flash.BackgroundTransparency = 0.4
+	flashGui.Enabled = true
+	task.spawn(function()
+		for i = 1, 8 do
+			task.wait(0.03)
+			flash.BackgroundTransparency = 0.4 + (i / 8) * 0.6
+		end
+		flashGui.Enabled = false
+	end)
+end
+
 specialEffectRemote.OnClientEvent:Connect(function(userId: number, element: string, position: Vector3, direction: Vector3?)
 	SoundManager.play("Special")
+	-- Drama: flash the screen on local player casts. Don't flash for
+	-- other players' casts (that'd be visual spam in PvP chaos).
+	if userId == player.UserId then
+		flashScreenWhite()
+	end
 	local targetPlayer = Players:GetPlayerByUserId(userId)
 	if not targetPlayer or not targetPlayer.Character then return end
 	local rootPart = targetPlayer.Character:FindFirstChild("HumanoidRootPart") :: BasePart?

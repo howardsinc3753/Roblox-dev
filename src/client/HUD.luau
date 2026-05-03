@@ -22,6 +22,10 @@ local roundTimerLabel: TextLabel
 local killFeedFrame: Frame
 local breathCooldownFrame: Frame
 local specialCooldownFrame: Frame
+local specialOverlayFrame: Frame -- drains top->bottom as cooldown elapses
+local specialNameLabel: TextLabel -- e.g. "FIRE VORTEX"
+local specialEffectLabel: TextLabel -- e.g. "DMG: 30" or "HEAL +40"
+local specialReadyStroke: UIStroke -- pulsing glow border when ready
 local dragonNameLabel: TextLabel
 
 function HUD.create()
@@ -215,26 +219,83 @@ function HUD.create()
 	breathCornerUI.CornerRadius = UDim.new(0, 8)
 	breathCornerUI.Parent = breathCooldownFrame
 
+	-- Special panel: prominent so the player notices the cooldown + sees the
+	-- damage their special does. Layout:
+	--   +-------------------+
+	--   |    FIRE VORTEX    | <- specialNameLabel
+	--   |        E          | <- big key hint
+	--   |     DMG: 30       | <- specialEffectLabel
+	--   +-------------------+
+	-- A dark overlay drains top->bottom as cooldown elapses. A pulsing glow
+	-- stroke appears when the special is ready to cast.
 	specialCooldownFrame = Instance.new("Frame")
-	specialCooldownFrame.Name = "SpecialCooldown"
-	specialCooldownFrame.Size = UDim2.fromOffset(50, 50)
-	specialCooldownFrame.Position = UDim2.new(0, 80, 0.88, 0)
-	specialCooldownFrame.BackgroundColor3 = Color3.fromRGB(100, 50, 255)
+	specialCooldownFrame.Name = "SpecialPanel"
+	specialCooldownFrame.Size = UDim2.fromOffset(140, 90)
+	specialCooldownFrame.Position = UDim2.new(0, 80, 0.88, -25)
+	specialCooldownFrame.BackgroundColor3 = Color3.fromRGB(60, 30, 120)
+	specialCooldownFrame.BackgroundTransparency = 0.15
 	specialCooldownFrame.BorderSizePixel = 0
+	specialCooldownFrame.ClipsDescendants = true -- so the overlay doesn't escape
 	specialCooldownFrame.Parent = screenGui
 
-	local specialLabel = Instance.new("TextLabel")
-	specialLabel.Size = UDim2.fromScale(1, 1)
-	specialLabel.BackgroundTransparency = 1
-	specialLabel.Text = "E"
-	specialLabel.TextColor3 = Color3.new(1, 1, 1)
-	specialLabel.Font = Enum.Font.GothamBold
-	specialLabel.TextScaled = true
-	specialLabel.Parent = specialCooldownFrame
-
 	local specialCornerUI = Instance.new("UICorner")
-	specialCornerUI.CornerRadius = UDim.new(0, 8)
+	specialCornerUI.CornerRadius = UDim.new(0, 10)
 	specialCornerUI.Parent = specialCooldownFrame
+
+	-- Pulsing glow ring around the panel when special is ready. We mutate
+	-- its Transparency in updateCooldowns for a "this is castable!" feel.
+	specialReadyStroke = Instance.new("UIStroke")
+	specialReadyStroke.Color = Color3.fromRGB(255, 215, 80)
+	specialReadyStroke.Thickness = 3
+	specialReadyStroke.Transparency = 1 -- invisible during cooldown
+	specialReadyStroke.Parent = specialCooldownFrame
+
+	specialNameLabel = Instance.new("TextLabel")
+	specialNameLabel.Name = "Name"
+	specialNameLabel.Size = UDim2.new(1, -10, 0, 18)
+	specialNameLabel.Position = UDim2.fromOffset(5, 4)
+	specialNameLabel.BackgroundTransparency = 1
+	specialNameLabel.Text = "SPECIAL"
+	specialNameLabel.TextColor3 = Color3.fromRGB(255, 215, 80)
+	specialNameLabel.TextStrokeTransparency = 0
+	specialNameLabel.Font = Enum.Font.GothamBlack
+	specialNameLabel.TextScaled = true
+	specialNameLabel.Parent = specialCooldownFrame
+
+	local specialKeyLabel = Instance.new("TextLabel")
+	specialKeyLabel.Size = UDim2.new(1, 0, 0, 36)
+	specialKeyLabel.Position = UDim2.fromOffset(0, 24)
+	specialKeyLabel.BackgroundTransparency = 1
+	specialKeyLabel.Text = "E / RMB"
+	specialKeyLabel.TextColor3 = Color3.new(1, 1, 1)
+	specialKeyLabel.TextStrokeTransparency = 0
+	specialKeyLabel.Font = Enum.Font.GothamBlack
+	specialKeyLabel.TextScaled = true
+	specialKeyLabel.Parent = specialCooldownFrame
+
+	specialEffectLabel = Instance.new("TextLabel")
+	specialEffectLabel.Name = "Effect"
+	specialEffectLabel.Size = UDim2.new(1, -10, 0, 22)
+	specialEffectLabel.Position = UDim2.new(0, 5, 1, -26)
+	specialEffectLabel.BackgroundTransparency = 1
+	specialEffectLabel.Text = "DMG: -"
+	specialEffectLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
+	specialEffectLabel.TextStrokeTransparency = 0
+	specialEffectLabel.Font = Enum.Font.GothamBold
+	specialEffectLabel.TextScaled = true
+	specialEffectLabel.Parent = specialCooldownFrame
+
+	-- Dark overlay drains top->bottom over the cooldown duration. Sits on top
+	-- of all the text via ZIndex (default = 1, we use 5).
+	specialOverlayFrame = Instance.new("Frame")
+	specialOverlayFrame.Name = "CooldownOverlay"
+	specialOverlayFrame.Size = UDim2.fromScale(1, 1)
+	specialOverlayFrame.Position = UDim2.fromScale(0, 0)
+	specialOverlayFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	specialOverlayFrame.BackgroundTransparency = 0.4
+	specialOverlayFrame.BorderSizePixel = 0
+	specialOverlayFrame.ZIndex = 5
+	specialOverlayFrame.Parent = specialCooldownFrame
 
 	-- === CONTROLS HINT (bottom center-left) ===
 	local controlsLabel = Instance.new("TextLabel")
@@ -288,20 +349,69 @@ function HUD.updateRoundTimer(text: string)
 	end
 end
 
+-- Per-element description for the special panel. Damage-dealing specials
+-- show "DMG: N", utility specials show their effect ("HEAL +40", etc).
+-- Lets the player know what their special actually does at a glance.
+local function describeSpecial(dragon: any): string
+	local element = dragon.element
+	if element == "Fire" then
+		return `DMG: {dragon.damage * 2}`
+	elseif element == "Lightning" then
+		return `DMG: {dragon.damage} x3`
+	elseif element == "Ice" then
+		return "HEAL +40"
+	elseif element == "Earth" then
+		return "ARMOR +50"
+	elseif element == "Dark" then
+		return "INVIS 3s"
+	elseif element == "Light" then
+		return "HEAL +30 AoE"
+	end
+	return ""
+end
+
 function HUD.setDragon(dragonId: string)
 	local dragon = DragonConfig[dragonId]
-	if dragon and dragonNameLabel then
+	if not dragon then return end
+	if dragonNameLabel then
 		dragonNameLabel.Text = `{dragon.name} ({dragon.element})`
 		dragonNameLabel.TextColor3 = dragon.color
 	end
+	if specialNameLabel then
+		specialNameLabel.Text = string.upper(dragon.specialName)
+	end
+	if specialEffectLabel then
+		specialEffectLabel.Text = describeSpecial(dragon)
+	end
+	-- Tint the special panel to match the dragon's element color (subtle
+	-- reminder of which dragon you're flying).
+	if specialCooldownFrame then
+		specialCooldownFrame.BackgroundColor3 = dragon.secondaryColor
+	end
 end
 
+-- Animation phase for the "ready" pulse. tick()-based so it's frame-rate
+-- independent and synchronized across all clients (cosmetic, but consistent).
 function HUD.updateCooldowns(breathPct: number, specialPct: number)
 	if breathCooldownFrame then
 		breathCooldownFrame.BackgroundTransparency = if breathPct >= 1 then 0 else 0.6
 	end
-	if specialCooldownFrame then
-		specialCooldownFrame.BackgroundTransparency = if specialPct >= 1 then 0 else 0.6
+
+	if specialCooldownFrame and specialOverlayFrame and specialReadyStroke then
+		-- specialPct goes 0 -> 1 over the cooldown. We render the overlay
+		-- as a "drain": full coverage at pct=0, empty at pct=1. So scale Y
+		-- = 1 - pct, anchored to the top.
+		local drainHeight = 1 - math.clamp(specialPct, 0, 1)
+		specialOverlayFrame.Size = UDim2.fromScale(1, drainHeight)
+
+		if specialPct >= 1 then
+			-- Ready: pulse the glow stroke between transparent and opaque.
+			-- Period ~1s, amplitude swings between 0 (visible) and 0.6 (faded).
+			local pulse = (math.sin(tick() * math.pi * 2) + 1) * 0.5 -- 0..1
+			specialReadyStroke.Transparency = 0.6 - pulse * 0.6
+		else
+			specialReadyStroke.Transparency = 1 -- hidden during cooldown
+		end
 	end
 end
 
