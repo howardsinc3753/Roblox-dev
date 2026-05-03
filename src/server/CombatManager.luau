@@ -188,6 +188,29 @@ function CombatManager.findHitPlayer(shooter: Player, origin: Vector3, direction
 	return closestPlayer
 end
 
+-- Same cone hit detection but checks a list of NPC states (NPCManager.getAlive()).
+-- Returns the closest NPC model or nil. Kept separate from findHitPlayer because
+-- NPCs aren't Player objects — different state structure, different reward path.
+function CombatManager.findHitNPC(npcStates: { any }, origin: Vector3, direction: Vector3): any?
+	local closest: any = nil
+	local closestDist = BREATH_RANGE
+
+	for _, npc in npcStates do
+		if npc.alive and npc.rootPart then
+			local toTarget = npc.rootPart.Position - origin
+			local dist = toTarget.Magnitude
+			if dist < closestDist then
+				local dot = toTarget.Unit:Dot(direction.Unit)
+				if dot > 0.85 then
+					closestDist = dist
+					closest = npc
+				end
+			end
+		end
+	end
+	return closest
+end
+
 -- Find all players within radius of a position
 function CombatManager.findPlayersInRadius(center: Vector3, radius: number, exclude: Player?): { Player }
 	local result: { Player } = {}

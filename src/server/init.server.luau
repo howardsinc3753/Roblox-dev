@@ -16,6 +16,7 @@ local RoundManager = require(script.RoundManager)
 local DragonSpawner = require(script.DragonSpawner)
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 local ArenaBuilder = require(script.ArenaBuilder)
+local NPCManager = require(script.NPCManager)
 
 print("[Server] Dragon Warz server starting...")
 
@@ -117,7 +118,9 @@ unlockDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 	print(`[Server] {player.Name} unlocked {id}!`)
 end)
 
--- Breath attack
+-- Breath attack: checks players first, then NPCs (priority: PvP fights take
+-- precedence when both are in the cone, so cooperating against NPCs doesn't
+-- accidentally heal the human meta).
 fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown, direction: unknown)
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
 	if not CombatManager.canFireBreath(player) then return end
@@ -131,7 +134,7 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	local dragon = DragonConfig[state.dragonId]
 	if not dragon then return end
 
-	-- Find hit target
+	-- Try player target first
 	local hitPlayer = CombatManager.findHitPlayer(player, origin :: Vector3, direction :: Vector3)
 	if hitPlayer then
 		local killed, damage = CombatManager.applyDamage(hitPlayer, dragon.damage)
@@ -150,7 +153,6 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 			playerKORemote:FireAllClients(player.UserId, hitPlayer.UserId)
 			updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
 
-			-- Respawn victim after delay
 			task.delay(RESPAWN_TIME, function()
 				if hitPlayer and hitPlayer.Parent then
 					local vData = DataManager.getData(hitPlayer)
@@ -160,6 +162,15 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 				end
 			end)
 		end
+		return
+	end
+
+	-- No player hit — check NPCs in the cone
+	local hitNpc = CombatManager.findHitNPC(NPCManager.getAlive(), origin :: Vector3, direction :: Vector3)
+	if hitNpc then
+		-- applyDamage handles coin reward via the kill callback registered below
+		NPCManager.applyDamage(hitNpc.id, dragon.damage, player.UserId)
+		damagePlayerRemote:FireAllClients(0, dragon.damage) -- 0 userId = NPC hit indicator
 	end
 end)
 
@@ -345,4 +356,55 @@ RoundManager.startLoop()
 -- Start auto-save loop
 DataManager.startAutoSave()
 
-print("[Server] Dragon Warz server ready!")
+-- ================================
+-- NPC SURVIVAL SYSTEM
+-- ================================
+
+-- Hook NPC kills into the existing reward + kill feed pipeline.
+-- When an NPC dies, the killer gets coins, the kill feed shows it,
+-- and the KO sound plays for everyone (via PlayerKO with NPC userId=0).
+NPCManager.setKillCallback(function(killerUserId: number, enemyType: string, coinReward: number)
+	local killer = Players:GetPlayerByUserId(killerUserId)
+	if not killer then return end
+
+	DataManager.addCoins(killer, coinReward)
+	updateCoinsRemote:FireClient(killer, DataManager.getCoins(killer))
+
+	local data = DataManager.getData(killer)
+	if data then data.stats.totalKills += 1 end
+
+	-- Fire KO event so the kill feed shows "[killer] eliminated [Enemy Type]"
+	-- userId 0 indicates NPC; client renders the enemy name from enemyType arg.
+	playerKORemote:FireAllClients(killerUserId, 0, enemyType)
+end)
+
+-- AI damage callback: when an NPC's AI tick decides to fire breath at a player,
+-- the damage flows through CombatManager so all the existing Humanoid sync,
+-- KO handling, respawn timing, and stats updates apply consistently.
+local function npcDamagePlayer(target: Player, damage: number, source: Vector3)
+	if not RoundManager.isActive() then return end
+	local killed, actualDamage = CombatManager.applyDamage(target, damage)
+	damagePlayerRemote:FireAllClients(target.UserId, actualDamage)
+
+	if killed then
+		local victimData = DataManager.getData(target)
+		if victimData then victimData.stats.totalDeaths += 1 end
+
+		-- userId 0 in the killer slot means "killed by NPC" — kill feed shows enemy
+		playerKORemote:FireAllClients(0, target.UserId, "Enemy")
+
+		task.delay(RESPAWN_TIME, function()
+			if target and target.Parent then
+				local vData = DataManager.getData(target)
+				local vDragonId = if vData then vData.selectedDragon else "Ember"
+				CombatManager.respawn(target)
+				DragonSpawner.spawn(target, vDragonId)
+			end
+		end)
+	end
+end
+
+NPCManager.startAILoop(npcDamagePlayer)
+NPCManager.startWaveLoop(RoundManager.isActive)
+
+print("[Server] Dragon Warz server ready! (with NPC survival system)")

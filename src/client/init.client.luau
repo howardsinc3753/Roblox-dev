@@ -132,12 +132,28 @@ damagePlayerRemote.OnClientEvent:Connect(function(targetUserId: number, damage: 
 	end
 end)
 
--- Player KO
-playerKORemote.OnClientEvent:Connect(function(killerUserId: number, victimUserId: number)
-	local killer = Players:GetPlayerByUserId(killerUserId)
-	local victim = Players:GetPlayerByUserId(victimUserId)
-	local killerName = if killer then killer.Name else "???"
-	local victimName = if victim then victim.Name else "???"
+-- Player KO. Server fires this for player-vs-player AND for NPC kills:
+--   killerUserId=0  → killed by NPC (enemyName carries the enemy type)
+--   victimUserId=0  → player killed an NPC (enemyName carries the enemy type)
+playerKORemote.OnClientEvent:Connect(function(killerUserId: number, victimUserId: number, enemyName: string?)
+	local killerName: string
+	local victimName: string
+
+	if killerUserId == 0 then
+		-- NPC killed a player
+		killerName = enemyName or "Enemy"
+	else
+		local killer = Players:GetPlayerByUserId(killerUserId)
+		killerName = if killer then killer.Name else "???"
+	end
+
+	if victimUserId == 0 then
+		-- Player killed an NPC
+		victimName = enemyName or "Enemy"
+	else
+		local victim = Players:GetPlayerByUserId(victimUserId)
+		victimName = if victim then victim.Name else "???"
+	end
 
 	HUD.addKillFeed(killerName, victimName)
 	SoundManager.play("KO")
