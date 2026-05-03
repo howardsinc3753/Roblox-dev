@@ -19,9 +19,15 @@ local SAVE_INTERVAL = 60
 -- get the normal locked progression. Saving still works in Studio (uses
 -- a separate temporary DataStore session), so this only changes initial
 -- defaults, not subsequent loads.
+--
+-- Set the `STUDIO_FRESH_PLAYER` workspace attribute to `true` in Studio to
+-- bypass these overrides and QA the genuine "Day 1, 0 coins, 2 dragons" UX
+-- (banner copy, dragon-locked states, etc). Toggle: in Studio Properties of
+-- workspace, add a Boolean attribute named STUDIO_FRESH_PLAYER, check it.
 local STUDIO_TEST_COINS = 1000
 local function applyStudioOverrides(data: PlayerDataTemplate.PlayerData)
 	if not RunService:IsStudio() then return end
+	if workspace:GetAttribute("STUDIO_FRESH_PLAYER") == true then return end
 	for dragonId in DragonConfig do
 		data.unlockedDragons[dragonId] = true
 	end
@@ -60,7 +66,7 @@ function DataManager.loadPlayer(player: Player): PlayerDataTemplate.PlayerData
 		data = result :: PlayerDataTemplate.PlayerData
 	else
 		if not ok then
-			warn(`[DataManager] Failed to load data for {player.Name}: {result}`)
+			warn(`[DataManager] Failed to load data for userId={player.UserId}: {result}`)
 		end
 		data = PlayerDataTemplate.getDefault()
 	end
@@ -80,7 +86,7 @@ function DataManager.savePlayer(player: Player): boolean
 	end)
 
 	if not ok then
-		warn(`[DataManager] Failed to save data for {player.Name}: {err}`)
+		warn(`[DataManager] Failed to save data for userId={player.UserId}: {err}`)
 		return false
 	end
 	return true
@@ -91,6 +97,15 @@ function DataManager.getData(player: Player): PlayerDataTemplate.PlayerData?
 end
 
 function DataManager.unloadPlayer(player: Player)
+	-- Strip the transient welcomeBonus before save so it doesn't persist to
+	-- DataStore and replay on a same-day re-join. This is the second leg of
+	-- the same-day banner-replay fix; the first is in processLogin's diff==0
+	-- branch (which clears it on next load if a stale value somehow slipped
+	-- through).
+	local data = cache[player.UserId]
+	if data then
+		data.welcomeBonus = nil
+	end
 	DataManager.savePlayer(player)
 	cache[player.UserId] = nil
 end
@@ -111,12 +126,14 @@ end
 -- RETENTION (daily login + streak + first-win-of-day)
 -- ================================
 
--- Tunables. If you tweak these, also update the comments in PlayerDataTemplate
--- so the design intent stays documented.
-local DAILY_LOGIN_BONUS = 10 -- flat coins for first login each day
-local STREAK_BONUS_PER_DAY = 5 -- per consecutive day, capped at MAX_STREAK_FOR_BONUS
-local MAX_STREAK_FOR_BONUS = 5 -- streak day at which streak bonus caps
-local FIRST_WIN_BONUS = 50 -- "first win of the day" payout, claimed once per UTC day
+-- Retention tunables sourced from PlayerDataTemplate so the client's
+-- WelcomeBanner reads the same MAX_STREAK_FOR_BONUS value we use here for
+-- bonus math. Single source of truth — bumping one side without the other
+-- desyncs the "X more days for max streak" copy.
+local DAILY_LOGIN_BONUS = PlayerDataTemplate.RETENTION.DAILY_LOGIN_BONUS
+local STREAK_BONUS_PER_DAY = PlayerDataTemplate.RETENTION.STREAK_BONUS_PER_DAY
+local MAX_STREAK_FOR_BONUS = PlayerDataTemplate.RETENTION.MAX_STREAK_FOR_BONUS
+local FIRST_WIN_BONUS = PlayerDataTemplate.RETENTION.FIRST_WIN_BONUS
 
 -- UTC day key as an integer (YYYYMMDD). Integer comparison is faster than
 -- string compare, and YYYYMMDD sorts correctly as a number too.
@@ -141,9 +158,14 @@ local function daysBetween(earlierDay: number, laterDay: number): number
 	end
 	local y1, m1, d1 = unpackDay(earlierDay)
 	local y2, m2, d2 = unpackDay(laterDay)
-	-- os.time interprets table fields as LOCAL time on most platforms; for
-	-- our integer-day comparison we just need a consistent reference point,
-	-- so local time is fine as long as we use it on both sides.
+	-- IMPORTANT: hour=12 is a deliberate DST defense, not arbitrary. os.time
+	-- interprets table fields as LOCAL time, and DST transitions make a
+	-- calendar day 23 or 25 hours long. Anchoring at NOON means the 1-hour
+	-- DST shift can never push the timestamp across a day boundary, so the
+	-- floor((t2 - t1) / 86400) division still yields the correct day count.
+	-- DO NOT change to hour=0 or hour=23 — both are within the DST danger
+	-- zone and will silently break streak math twice a year for users in
+	-- DST-observing regions.
 	local t1 = os.time({ year = y1, month = m1, day = d1, hour = 12, min = 0, sec = 0 } :: any)
 	local t2 = os.time({ year = y2, month = m2, day = d2, hour = 12, min = 0, sec = 0 } :: any)
 	return math.floor((t2 - t1) / 86400)
@@ -161,8 +183,12 @@ function DataManager.processLogin(player: Player)
 	local diff = daysBetween(data.lastLoginDay, today)
 
 	if diff == 0 then
-		-- Already logged in today — no bonus, but keep welcomeBonus from earlier
-		-- if it was set this session (shouldn't normally happen, defensive)
+		-- Already logged in today — no bonus AND clear any stale welcomeBonus.
+		-- Why clear: welcomeBonus lives inside PlayerData and gets persisted
+		-- to DataStore on save. Without this clear, a player who logs out and
+		-- back in on the same day would replay yesterday's banner with no
+		-- actual coin grant (the bonus was already applied earlier today).
+		data.welcomeBonus = nil
 		return
 	elseif diff == 1 then
 		-- Logged in yesterday → streak continues
@@ -182,6 +208,11 @@ function DataManager.processLogin(player: Player)
 
 	-- firstWinAvailable: true if they haven't claimed today's first-win bonus yet.
 	-- Used by the welcome banner to tease the next reward in the same flow.
+	-- CAVEAT: this is a SNAPSHOT taken at login time. If a player wins later
+	-- in the session and we ever add a "show welcome banner again" feature,
+	-- this field would be stale (still true even after the win). Today the
+	-- banner self-throttles via shownThisSession, so the staleness is
+	-- invisible — but a future re-show feature must recompute this.
 	local firstWinAvailable = data.lastWinDay ~= today
 
 	data.welcomeBonus = {
@@ -192,7 +223,9 @@ function DataManager.processLogin(player: Player)
 		firstWinAvailable = firstWinAvailable,
 	}
 
-	print(`[DataManager] {player.Name} login: streak={data.loginStreak}, +{totalCoins} coins`)
+	-- Log UserId not Name. Targeting kids (9-16); the published place will
+	-- have COPPA scope and we should keep PII out of server logs by default.
+	print(`[DataManager] login userId={player.UserId}: streak={data.loginStreak}, +{totalCoins} coins`)
 end
 
 -- Claim the first-win-of-day bonus. Returns (claimed: boolean, bonus: number).
@@ -206,7 +239,8 @@ function DataManager.claimFirstWin(player: Player): (boolean, number)
 	end
 	data.lastWinDay = today
 	data.coins += FIRST_WIN_BONUS
-	print(`[DataManager] {player.Name} claimed first-win-of-day bonus +{FIRST_WIN_BONUS}`)
+	-- UserId not Name; see processLogin comment on COPPA scope.
+	print(`[DataManager] userId={player.UserId} claimed first-win-of-day bonus +{FIRST_WIN_BONUS}`)
 	return true, FIRST_WIN_BONUS
 end
 

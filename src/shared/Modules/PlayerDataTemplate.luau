@@ -69,7 +69,19 @@ local function getDefault(): PlayerData
 	}
 end
 
+-- Retention tunables. Single source of truth shared by server (DataManager
+-- grants the bonuses) and client (WelcomeBanner renders progress copy like
+-- "X more days for max streak"). Bumping these on server alone would
+-- desync the client's max-streak threshold and produce wrong UI text.
+local RETENTION = {
+	DAILY_LOGIN_BONUS = 10, -- flat coins for first login each day
+	STREAK_BONUS_PER_DAY = 5, -- per consecutive day, capped at MAX_STREAK_FOR_BONUS
+	MAX_STREAK_FOR_BONUS = 5, -- streak day at which the streak bonus caps
+	FIRST_WIN_BONUS = 50, -- "first win of the day" payout, claimed once per UTC day
+}
+
 return {
 	DEFAULT = DEFAULT_DATA,
 	getDefault = getDefault,
+	RETENTION = RETENTION,
 }

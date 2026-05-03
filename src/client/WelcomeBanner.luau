@@ -8,7 +8,10 @@
 -- call on join). No new remote needed.
 
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
+
+local PlayerDataTemplate = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Modules"):WaitForChild("PlayerDataTemplate"))
 
 local WelcomeBanner = {}
 
@@ -17,7 +20,10 @@ local playerGui = player:WaitForChild("PlayerGui") :: PlayerGui
 
 local DISPLAY_DURATION = 5 -- seconds visible before fade
 local FADE_DURATION = 0.5 -- seconds of fade-out animation
-local MAX_STREAK_FOR_BONUS = 5 -- mirror of DataManager constant for "X more days" copy
+-- Pulled from PlayerDataTemplate.RETENTION so server's bonus-cap value and
+-- this UI's "X more days for max" copy stay in sync. Bumping one without
+-- the other previously caused mismatched messaging.
+local MAX_STREAK_FOR_BONUS = PlayerDataTemplate.RETENTION.MAX_STREAK_FOR_BONUS
 
 -- Track if banner has been shown this session to avoid re-showing on
 -- subsequent GetPlayerData refreshes (e.g., after dragon select reload).
@@ -76,8 +82,11 @@ local function buildCard(bonus: any): Frame
 	streakLine.TextColor3 = Color3.fromRGB(255, 120, 50)
 	streakLine.Font = Enum.Font.GothamBold
 	streakLine.TextScaled = true
+	-- Day 1 isn't really a "streak" yet, just the start. Different copy on
+	-- Day 1 reads more naturally and frames the streak as something to BUILD
+	-- (not something they already have a 1-of). Day 2+ uses streak language.
 	if bonus.streak == 1 then
-		streakLine.Text = "🔥 1 Day Streak"
+		streakLine.Text = "🔥 Welcome — Day 1"
 	else
 		streakLine.Text = `🔥 {bonus.streak} Day Streak!`
 	end
@@ -108,7 +117,14 @@ local function buildCard(bonus: any): Frame
 	bonusLine.TextColor3 = Color3.fromRGB(255, 215, 0)
 	bonusLine.Font = Enum.Font.GothamBold
 	bonusLine.TextScaled = true
-	bonusLine.Text = `+{bonus.totalCoins} coins ({bonus.dailyCoins} daily + {bonus.streakCoins} streak)`
+	-- Day 1 says "starter" instead of "streak" since calling +5 a streak bonus
+	-- on the first day is weird. Day 2+ uses streak language to reinforce the
+	-- compounding-reward mental model.
+	if bonus.streak == 1 then
+		bonusLine.Text = `+{bonus.totalCoins} coins ({bonus.dailyCoins} daily + {bonus.streakCoins} starter)`
+	else
+		bonusLine.Text = `+{bonus.totalCoins} coins ({bonus.dailyCoins} daily + {bonus.streakCoins} streak)`
+	end
 	bonusLine.Parent = card
 
 	-- First-win tease (only if not already claimed today)
