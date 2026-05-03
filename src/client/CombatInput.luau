@@ -31,7 +31,7 @@ local currentDragonId = "Ember"
 -- Cooldown tracking (client-side prediction)
 local lastBreathTime = 0
 local lastSpecialTime = 0
-local BREATH_COOLDOWN = 1.0
+local BREATH_COOLDOWN = 0.5
 local SPECIAL_COOLDOWN = 10.0
 
 -- Remotes (set after they're available)

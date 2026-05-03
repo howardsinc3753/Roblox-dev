@@ -20,7 +20,7 @@ export type CombatState = {
 }
 
 local playerStates: { [number]: CombatState } = {}
-local BREATH_COOLDOWN = 1.0
+local BREATH_COOLDOWN = 0.5
 local SPECIAL_COOLDOWN = 10.0
 local BREATH_RANGE = 100 -- studs
 
