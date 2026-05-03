@@ -26,7 +26,13 @@ print("[Server] Dragon Warz server starting...")
 -- once at server start. Sprint 5 Part E adds the portal Touched handlers
 -- that teleport players between them.
 ArenaBuilder.build()
-LairBuilder.build()
+-- Defensive pcall: if LairBuilder errors, the rest of server init (remote
+-- handlers, PlayerAdded, etc.) still runs so the game stays playable. The
+-- error is logged so we can diagnose. Remove the pcall once Lair is stable.
+local lairOk, lairErr = pcall(LairBuilder.build)
+if not lairOk then
+	warn(`[Server] LairBuilder.build failed — game running without Lair: {lairErr}`)
+end
 
 -- Helper to get a remote
 local function getRemote(name: string): RemoteEvent
