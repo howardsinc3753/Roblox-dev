@@ -306,20 +306,54 @@ Implementation:
 - Auto-cleanup via Players.PlayerRemoving so a crashed-out player
   doesn't leak their session record
 
-### Sprint 10 — Boss Waves: BLAZE THE INFERNO LORD (~10-12 hours) — PLANNED, NOT YET STARTED
+### Sprint 10 — Boss Waves: BLAZE THE INFERNO LORD (~10-12 hours) ✅ shipped
 
-Spec locked after peer-Claude audit pass:
-- Single boss for MVP (Frostmaul / Voltrix as Stage 1.5 reskins after
-  data validates the loop)
-- Cadence: every 3rd round = Mega Boss Round (4th wave appended)
-- HP `800 × playerCount`, locked at spawn (no dynamic rescale)
-- Two telegraphed attacks: Inferno Slam (1.8s circle) + Magma Beam (1.5s line)
-- Reward: 50 flat participation + 300 damage-share
-- 30s timeout warning: "BOSS ESCAPING IN 30s — FINISH HIM"; despawn at 0
-  with no rewards (failure → learning loop)
-- Boss music swap on encounter
-- Storm dragon mesh upscaled scale=12 + deep-red tint (no new asset)
-- Persistent `bossesDefeated` stat in PlayerData
+Use case: Sprint 7 made the player progress (stat upgrades). Sprint 8
+made the world look alive. Sprint 9a gave us the analytics. Sprint 10
+adds architectural progression to the WORLD content — every 3rd round
+breaks the circular wave-3-and-done pattern with a multi-mechanic boss
+encounter. Word-of-mouth driver: "Did you beat Blaze yet?"
+
+Shipped in 6 incremental commits + this docs commit:
+
+- **(1/7) Boss data layer** — EnemyConfig.Blaze entry (800 HP base ×
+  playerCount, deep-red tint, Storm-mesh-upscaled-12 visual, 25 dmg
+  per telegraph), PlayerData.stats.bossesDefeated persistent stat,
+  BossManager.luau skeleton with single-instance invariant +
+  damageByUser map.
+- **(2/7) Telegraph remote + client renderer** —
+  BossTelegraph.luau renders red circle (InfernoSlam) + line preview
+  (MagmaBeam) with 1.5-1.8s windups tuned for kid Xbox reaction time.
+  Visual hitbox slightly wider than damage hitbox so dodging feels fair.
+- **(3/7) Mega-Boss-Round cadence** — runWaveSequence takes
+  roundNumber, appends a Mega-Boss wave on rounds where roundNumber %
+  3 == 0. Polling loop waits for boss death (HP=0) or 90s fight
+  timeout. Defensive cleanup catches round force-end races.
+- **(4/7) Boss AI + player damage routing** —
+  BossManager.tryHitWithCone exposes the boss for fireBreath / Fire
+  vortex / Lightning chain hit detection (mirrors findHitNPC pattern).
+  Boss AI tick alternates Inferno Slam (30-stud radius, 35 dmg) +
+  Magma Beam (80-stud line, 30 dmg) every 5s. Each attack picks a
+  random alive Arena player as target.
+- **(5/7) Rewards + persistence + timeout flow** — defeat callback
+  pays 50 flat + 300 damage-share to each contributing player,
+  increments bossesDefeated stat, fires Analytics.bossDefeated.
+  Timeout callback fires Analytics.bossTimedOut + "BLAZE ESCAPES"
+  banner. Failure path pays nothing (peer audit: learning loop).
+- **(6/7) Boss banner UX + music swap** — WaveTracker handles
+  INCOMING / WARNING / DEFEATED / TIMEOUT states with distinct
+  themes. WARNING state runs a per-second countdown ("BLAZE ESCAPING
+  IN Ns") on its own thread, cancellable on state change.
+  SoundManager.setBossMusicActive pitch-shifts arena music 1.0 → 1.3
+  during the encounter (peer audit: pitch-shift carries enough
+  signal for MVP, no new asset upload).
+
+Stage 1.5 (deferred — gated on Sprint 10 analytics showing engagement):
+- Frostmaul (Ice) and Voltrix (Lightning) reskins of the Blaze template
+- Multi-phase boss AI (phase transitions at HP thresholds)
+- Per-boss elemental weaknesses (Fire dragon vs. Ice boss does +25%)
+- Bosses Defeated leaderboard / B-menu badge
+- More attack patterns per boss (3 instead of 2)
 
 ### Sprint 8 — First-time Tutorial (~4-5 hours)
 - Detect first-ever join (`data.totalLogins == 1` — peer Claude already tracks this)

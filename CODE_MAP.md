@@ -52,7 +52,8 @@ init.server.luau  (entry — RUNS FIRST, errors here = total breakage)
 ├── ZoneManager.luau          ← Sprint 5 Part C: Lair sphere test + Player.Zone attribute
 ├── DragonProgression.luau    ← Sprint 7: per-dragon stat upgrades, cost curve, atomic tryUpgrade
 ├── Analytics.luau            ← Sprint 9a: AnalyticsService wrapper, session bookkeeping, funnel events
-├── NPCManager.luau           ← AI dragons + Sprint 6 wave state machine (runWaveSequence)
+├── BossManager.luau          ← Sprint 10: BLAZE Mega Boss — spawn, AI, telegraphs, damage tracking, defeat/timeout callbacks
+├── NPCManager.luau           ← AI dragons + Sprint 6 wave state machine + Sprint 10 mega-boss-round detection
 │   └── EnemyConfig (shared)
 └── RateLimiter.luau          ← per-player remote spam prevention
 ```
@@ -78,7 +79,8 @@ init.client.luau (entry — depends on remotes existing!)
 ├── SafeZoneIndicator.luau    ← Sprint 5 Part C: "SAFE ZONE" pill, attribute-driven
 ├── WaveTracker.luau          ← Sprint 6: wave-state HUD (incoming / counter / clear / rest)
 ├── DragonUpgradeUI.luau      ← Sprint 7: stat-upgrade modal (multi-dragon tabs, preview, confirm)
-└── LairAtmosphere.luau       ← Sprint 8: Lighting-tint crossfade on Lair / Arena zone change
+├── LairAtmosphere.luau       ← Sprint 8: Lighting-tint crossfade on Lair / Arena zone change
+└── BossTelegraph.luau        ← Sprint 10: client renderer for Mega Boss attack telegraphs (red circle / line preview)
 ```
 
 ### Shared (`src/shared/`)
