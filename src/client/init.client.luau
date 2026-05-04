@@ -34,6 +34,7 @@ local TipManager = require(script.TipManager)
 local SafeZoneIndicator = require(script.SafeZoneIndicator)
 local WaveTracker = require(script.WaveTracker)
 local DragonUpgradeUI = require(script.DragonUpgradeUI)
+local LairAtmosphere = require(script.LairAtmosphere)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -60,6 +61,10 @@ WaveTracker.init()
 -- (.open) from the Stat Stone's ProximityPrompt handler below.
 DragonUpgradeUI.create()
 DragonUpgradeUI.init()
+-- Sprint 8: per-zone Lighting tint. Reads Player.Zone attribute (Sprint 5
+-- ZoneManager) and shifts global Lighting toward magical-realm purple-gold
+-- when in the Lair, restores Studio baseline when in the Arena.
+LairAtmosphere.init()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns

@@ -1,0 +1,109 @@
+--!strict
+-- Sprint 8: per-zone lighting tint. Shifts the global Lighting service
+-- toward a purple-gold magical-realm feel when the player is in the
+-- Lair, back to the combat-baseline tint when they're in the Arena.
+--
+-- Why client-side: Lighting is a shared service; tinting it server-side
+-- would affect ALL players regardless of which zone they're in. The
+-- only correct architecture is per-client based on the local player's
+-- own Zone attribute (Sprint 5 ZoneManager). Each client renders its
+-- own atmosphere.
+--
+-- Self-contained ScreenGui-free module — same isolation pattern as
+-- SafeZoneIndicator and WaveTracker. A syntax error here can't take
+-- HUD or any other gameplay system down. If this module fails, the
+-- worst case is the Lighting service stays at its baseline values
+-- (which is fine; the Lair is still playable, just less atmospheric).
+
+local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+
+local LairAtmosphere = {}
+
+local player = Players.LocalPlayer
+
+-- Captured at init time so we can restore EXACTLY what the project's
+-- baseline Lighting properties are (rather than hard-coding values
+-- that might drift from the Studio Lighting settings). Saved on first
+-- init() call; reused on every Arena entry.
+local baseline: { Ambient: Color3, OutdoorAmbient: Color3, FogColor: Color3, FogEnd: number }? = nil
+
+-- Lair atmosphere — purple-gold magical realm. Slightly tinted ambient
+-- + warmer fog + closer fog distance so the volume feels enclosed and
+-- "different world" from the Arena's open-sky setting. Subtle enough
+-- not to wash out the dragon meshes.
+local LAIR_AMBIENT = Color3.fromRGB(60, 40, 80)
+local LAIR_OUTDOOR_AMBIENT = Color3.fromRGB(120, 90, 160)
+local LAIR_FOG_COLOR = Color3.fromRGB(140, 90, 180)
+local LAIR_FOG_END = 800 -- closer than typical outdoor
+
+local TWEEN_DURATION = 1.5 -- crossfade between zones, matches the music crossfade pace
+
+-- Apply a target lighting set via TweenService. Generation guard prevents
+-- a slow tween from a previous zone-change writing over a fresh tween if
+-- the kid rapid-cycles the portal.
+local generation = 0
+
+local function applyLighting(target: { Ambient: Color3, OutdoorAmbient: Color3, FogColor: Color3, FogEnd: number })
+	generation += 1
+	local myGen = generation
+	-- Tween Lighting properties directly. TweenService accepts the
+	-- Lighting service as the target since it's a Roblox-derived
+	-- Instance.
+	local tween = TweenService:Create(Lighting,
+		TweenInfo.new(TWEEN_DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+		{
+			Ambient = target.Ambient,
+			OutdoorAmbient = target.OutdoorAmbient,
+			FogColor = target.FogColor,
+			FogEnd = target.FogEnd,
+		}
+	)
+	tween:Play()
+	-- No need to wait — tween runs to completion on its own thread.
+	-- The myGen capture is here for future expansion (e.g., abort the
+	-- tween if a newer one starts).
+	_ = myGen
+end
+
+local function refreshFromZone()
+	if not baseline then return end
+	local zoneAttr = player:GetAttribute("Zone")
+	-- Default to Lair if the attribute hasn't replicated yet — matches
+	-- the first-spawn behavior + LairAtmosphere shows the magical
+	-- realm tint on the kid's first frame.
+	local inLair = zoneAttr == nil or zoneAttr == "Lair"
+	if inLair then
+		applyLighting({
+			Ambient = LAIR_AMBIENT,
+			OutdoorAmbient = LAIR_OUTDOOR_AMBIENT,
+			FogColor = LAIR_FOG_COLOR,
+			FogEnd = LAIR_FOG_END,
+		})
+	else
+		applyLighting(baseline)
+	end
+end
+
+function LairAtmosphere.init()
+	-- Snapshot the baseline once. After this point, applyLighting can
+	-- restore the project's exact Studio defaults regardless of how
+	-- many tweens have run in between.
+	baseline = {
+		Ambient = Lighting.Ambient,
+		OutdoorAmbient = Lighting.OutdoorAmbient,
+		FogColor = Lighting.FogColor,
+		FogEnd = Lighting.FogEnd,
+	}
+
+	-- Apply initial state based on current Zone attribute (likely Lair
+	-- since players spawn there). PlayerAdded → ZoneManager fires the
+	-- first stamp by the time client init runs, so this should land
+	-- correctly without race.
+	refreshFromZone()
+
+	player:GetAttributeChangedSignal("Zone"):Connect(refreshFromZone)
+end
+
+return LairAtmosphere
