@@ -234,11 +234,35 @@ end
 
 -- ===== Damage tracking (used by commits 4-5) =====
 
+-- ===== Sprint 10 commit 5: defeat / timeout callbacks =====
+-- Fires when boss HP hits 0 — reward distribution + bossesDefeated
+-- persistence + analytics happen in init.server.luau's wiring. Keeps
+-- BossManager focused on combat state; reward semantics belong with
+-- the rest of the economy code in init.server.luau.
+local onDefeatCallback: ((bossType: string, contributions: { [number]: number }, totalDamage: number) -> ())? = nil
+-- Fires on the timeout despawn path — analytics + "BLAZE ESCAPES"
+-- banner. No rewards (peer audit: failure is a learning loop).
+local onTimeoutCallback: ((bossType: string, hpRemainingPercent: number) -> ())? = nil
+
+function BossManager.setOnDefeatCallback(cb: (bossType: string, contributions: { [number]: number }, totalDamage: number) -> ())
+	onDefeatCallback = cb
+end
+
+function BossManager.setOnTimeoutCallback(cb: (bossType: string, hpRemainingPercent: number) -> ())
+	onTimeoutCallback = cb
+end
+
 -- Apply damage to the active boss. Returns (killed, actualDamage).
 -- Records the userId's contribution in damageByUser so the death
--- payout (commit 5) can split the share pool proportionally.
--- killerUserId is the player who landed the hit; nil for environmental
--- damage (none currently exists, future-proofing).
+-- payout can split the share pool proportionally. killerUserId is
+-- the player who landed the hit; nil for environmental damage (none
+-- currently exists, future-proofing).
+--
+-- Sprint 10 commit 5: on HP-0 detection, fires onDefeatCallback with
+-- the contributions snapshot BEFORE clearing activeBoss so the
+-- reward path can iterate the map. The model itself isn't despawned
+-- here — the callback handles a brief death-display delay before
+-- BossManager.despawn().
 function BossManager.applyDamage(damage: number, killerUserId: number?): (boolean, number)
 	if not activeBoss or not activeBoss.alive then
 		return false, 0
@@ -253,9 +277,41 @@ function BossManager.applyDamage(damage: number, killerUserId: number?): (boolea
 
 	if activeBoss.currentHealth <= 0 then
 		activeBoss.alive = false
+		if onDefeatCallback then
+			-- Snapshot the contributions table + total before any other
+			-- code path can clear activeBoss. Defensive copy of the map
+			-- so downstream iteration is safe even if despawn() runs
+			-- during the callback (it shouldn't, but the table reference
+			-- would dangle if it did).
+			local contributionsCopy: { [number]: number } = {}
+			local totalDamage = 0
+			for userId, dmg in activeBoss.damageByUser do
+				contributionsCopy[userId] = dmg
+				totalDamage += dmg
+			end
+			onDefeatCallback(activeBoss.bossType, contributionsCopy, totalDamage)
+		end
 		return true, damage
 	end
 	return false, damage
+end
+
+-- Sprint 10 commit 5: timeout-specific despawn. Fires the timeout
+-- callback (analytics + banner) BEFORE clearing state, then despawns
+-- the model. Distinct from the plain despawn() so a "force cleanup"
+-- caller (round force-end) doesn't accidentally trigger the
+-- "BOSS ESCAPED" banner — they should call despawn() directly.
+function BossManager.timeoutDespawn()
+	if not activeBoss then return end
+	local hpPct = if activeBoss.maxHealth > 0 then activeBoss.currentHealth / activeBoss.maxHealth else 0
+	if onTimeoutCallback then
+		-- Pass the contributions table reference so the callback can
+		-- fire per-player analytics for each kid who damaged Blaze
+		-- before time ran out. Read-only on the caller side.
+		onTimeoutCallback(activeBoss.bossType, hpPct)
+	end
+	activeBoss.alive = false -- breaks AI tick loop immediately
+	BossManager.despawn()
 end
 
 -- ===== Helpers used by commit 5 reward path =====

@@ -1153,6 +1153,74 @@ BossManager.setTelegraphCallback(function(attackType: string, originPos: Vector3
 	bossTelegraphRemote:FireAllClients(attackType, originPos, directionOrRadius, windupSec)
 end)
 
+-- Sprint 10 commit 5: boss death + reward distribution.
+-- Reward formula (peer audit): 50 flat participation + 300 damage-share.
+-- Solo player: 50 + 300 = 350 coins. 4-player team each: 50 + ~75 = ~125.
+-- The flat bonus protects new-kid feel-bad; the share rewards effort.
+-- Players who left mid-fight have their share dropped silently
+-- (Players:GetPlayerByUserId returns nil → skip); the pool isn't
+-- redistributed to the remaining players (keeps math simple).
+local BOSS_FLAT_PARTICIPATION = 50
+local BOSS_SHARE_POOL = 300
+
+BossManager.setOnDefeatCallback(function(bossType: string, contributions: { [number]: number }, totalDamage: number)
+	local roundState = RoundManager.getState()
+	for userId, contribDmg in contributions do
+		local player = Players:GetPlayerByUserId(userId)
+		if not player then continue end -- left server mid-fight; their share is forfeit
+		local share = if totalDamage > 0 then math.floor((contribDmg / totalDamage) * BOSS_SHARE_POOL) else 0
+		local payout = BOSS_FLAT_PARTICIPATION + share
+		DataManager.addCoins(player, payout)
+		RoundManager.recordCoins(player, payout) -- counts toward end-of-round summary
+		updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+		refreshLeaderstats(player)
+		-- Persistent bragging-rights stat (Sprint 10 PlayerData addition).
+		-- Increment for any kid who damaged Blaze before death — they
+		-- "defeated" him collectively even if they didn't deal the kill blow.
+		local data = DataManager.getData(player)
+		if data and data.stats then
+			data.stats.bossesDefeated = (data.stats.bossesDefeated or 0) + 1
+		end
+		-- Analytics: lights up the BossDefeated event (scaffolded in
+		-- Sprint 9a). damageContribution and coinReward dimensions feed
+		-- the dashboard's "boss DPS distribution" + "boss reward
+		-- distribution" charts.
+		Analytics.bossDefeated(player, bossType, roundState.roundNumber, contribDmg, payout)
+	end
+	-- Banner: "BLAZE FALLS" celebration. Commit 6 wires the client
+	-- WaveTracker handler that renders this state.
+	bossBannerStateRemote:FireAllClients("DEFEATED", { bossType = bossType })
+	-- Music: revert to zone music. Active=false signals the client
+	-- LairAtmosphere/SoundManager pair to restore the pre-encounter
+	-- music state.
+	bossMusicStateRemote:FireAllClients(false)
+	-- Hold the death-pose model for a moment before despawning so kids
+	-- see the boss go down rather than vanishing instantly. 2 seconds
+	-- matches the wave-clear celebration window.
+	task.delay(2, function()
+		BossManager.despawn()
+	end)
+	print(`[Server] {bossType} defeated; awarded {BOSS_FLAT_PARTICIPATION} flat + {BOSS_SHARE_POOL} share across {totalDamage} total damage`)
+end)
+
+BossManager.setOnTimeoutCallback(function(bossType: string, hpRemainingPercent: number)
+	-- No reward distribution by design (peer audit: failure → learning
+	-- loop). Analytics fires for each kid who DID damage the boss so
+	-- the dashboard can show "engaged but failed" vs. "didn't engage."
+	local roundState = RoundManager.getState()
+	for userId in BossManager.getDamageContributions() do
+		local player = Players:GetPlayerByUserId(userId)
+		if player then
+			Analytics.bossTimedOut(player, bossType, roundState.roundNumber, hpRemainingPercent)
+		end
+	end
+	-- Banner: "BLAZE ESCAPES" — kid sees their failure clearly. Commit
+	-- 6 wires the client WaveTracker handler.
+	bossBannerStateRemote:FireAllClients("TIMEOUT", { bossType = bossType, hpRemainingPercent = hpRemainingPercent })
+	bossMusicStateRemote:FireAllClients(false)
+	print(`[Server] {bossType} timed out at {math.floor(hpRemainingPercent * 100)}% HP remaining`)
+end)
+
 -- ================================
 -- Sprint 5 Part E: PORTAL TELEPORTS
 -- ================================

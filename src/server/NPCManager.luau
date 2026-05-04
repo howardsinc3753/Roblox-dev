@@ -860,17 +860,27 @@ function NPCManager.runWaveSequence(
 				end
 			end
 			local clearTime = tick() - startTime
-			-- Force despawn if we exited via timeout / round-end with
-			-- the boss still alive. The reward path (commit 5) hooks
-			-- in earlier (intercepts the death moment) so a CLEARED
-			-- exit's despawn happens via the reward path, not here.
-			if BossManager.isActive() then
-				BossManager.despawn()
+			-- Branch by exit reason. Sprint 10 commit 5: timedOut takes
+			-- the timeoutDespawn path (fires "BLAZE ESCAPES" banner +
+			-- timeout analytics, no rewards). Round-aborted (force-end
+			-- via safety cap) takes plain despawn (no banner — kids
+			-- already saw the round end). Cleared exits don't despawn
+			-- here at all; the onDefeatCallback in init.server.luau
+			-- holds the model for ~2 seconds for the death animation
+			-- and despawns at the end of that.
+			if timedOut then
+				print(`[NPCManager] Blaze TIMED OUT after {math.floor(clearTime)}s`)
+				if BossManager.isActive() then
+					BossManager.timeoutDespawn()
+				end
+			elseif not isRoundActive() then
+				if BossManager.isActive() then
+					BossManager.despawn() -- silent cleanup, no banner
+				end
 			end
 			local status: string
 			if timedOut then
 				status = "TIMEOUT"
-				print(`[NPCManager] Blaze TIMED OUT after {math.floor(clearTime)}s`)
 			elseif not isRoundActive() then
 				status = "ABORTED"
 			else
