@@ -568,8 +568,21 @@ end
 -- fireBreath carve-out that routes Lair-shooter cones into damageDummy
 -- ships in a SEPARATE commit (peer audit guidance — that's the only Sprint
 -- 7 change touching the safe-zone gate so it gets blast-radius isolation).
+-- Sprint 8: each dummy gets a distinct element identity so they read as
+-- different targets, not three identical wooden statues. Three slots —
+-- Fire / Ice / Lightning — each colored body + element-themed floating
+-- accent above the head + matching billboard color. Lays groundwork
+-- for future damage-type weakness mechanics; for now purely cosmetic.
+local DUMMY_ELEMENTS = {
+	{ name = "Fire", bodyColor = Color3.fromRGB(180, 80, 40), accentColor = Color3.fromRGB(255, 120, 30), particle = "rbxasset://textures/particles/fire_main.dds" },
+	{ name = "Ice", bodyColor = Color3.fromRGB(80, 130, 180), accentColor = Color3.fromRGB(150, 220, 255), particle = "rbxasset://textures/particles/sparkles_main.dds" },
+	{ name = "Lightning", bodyColor = Color3.fromRGB(200, 170, 60), accentColor = Color3.fromRGB(255, 240, 100), particle = "rbxasset://textures/particles/sparkles_main.dds" },
+}
+
 local function buildPracticeDummies(parent: Instance)
+	local TweenService = game:GetService("TweenService")
 	for i = 1, 3 do
+		local element = DUMMY_ELEMENTS[i]
 		local angle = math.rad(60 + i * 50) -- arc on one side of the lair
 		local pos = LAIR_CENTER + Vector3.new(
 			math.cos(angle) * 50,
@@ -580,21 +593,73 @@ local function buildPracticeDummies(parent: Instance)
 		-- the fireBreath carve-out) can identify a hit on a dummy. The body
 		-- is the canonical "target part" for the cone test — ignore the head
 		-- so we only count one hit per breath even if both parts are in cone.
-		local body = makePart(`Dummy_{i}_Body`, parent, {
+		local body = makePart(`Dummy_{i}_{element.name}_Body`, parent, {
 			Size = Vector3.new(4, 5, 4),
 			CFrame = CFrame.new(pos),
-			Color = Color3.fromRGB(150, 100, 80),
+			Color = element.bodyColor,
 			Material = Enum.Material.Wood,
 		})
 		CollectionService:AddTag(body, PRACTICE_DUMMY_TAG)
 		-- Head — visual only, NOT tagged (only the body is the cone target)
-		makePart(`Dummy_{i}_Head`, parent, {
+		makePart(`Dummy_{i}_{element.name}_Head`, parent, {
 			Shape = Enum.PartType.Ball,
 			Size = Vector3.new(3, 3, 3),
 			CFrame = CFrame.new(pos + Vector3.new(0, 4, 0)),
-			Color = Color3.fromRGB(200, 150, 120),
+			Color = element.accentColor,
 			Material = Enum.Material.Wood,
 		})
+
+		-- Sprint 8: floating element accent above the head — small bobbing
+		-- neon orb in the element color + a particle wisp. Reads as
+		-- "this dummy is themed Fire/Ice/Lightning" without needing to
+		-- read a label. Bobbing motion makes the dummy feel alive even
+		-- when no kid is hitting it.
+		local accent = makePart(`Dummy_{i}_{element.name}_Accent`, parent, {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(1.4, 1.4, 1.4),
+			CFrame = CFrame.new(pos + Vector3.new(0, 8, 0)),
+			Color = element.accentColor,
+			Material = Enum.Material.Neon,
+			Transparency = 0.1,
+		})
+		-- Bobbing motion: 1.5 stud range, 2.5 second cycle. Each dummy on
+		-- its own phase so they don't bob in lockstep.
+		task.delay((i - 1) * 0.7, function()
+			while accent.Parent do
+				local startY = pos.Y + 8
+				local up = TweenService:Create(accent,
+					TweenInfo.new(1.25, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ CFrame = CFrame.new(pos + Vector3.new(0, 9.5, 0)) }
+				)
+				up:Play()
+				up.Completed:Wait()
+				if not accent.Parent then break end
+				local down = TweenService:Create(accent,
+					TweenInfo.new(1.25, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ CFrame = CFrame.new(pos + Vector3.new(0, 8, 0)) }
+				)
+				down:Play()
+				down.Completed:Wait()
+				_ = startY
+			end
+		end)
+		-- Element-themed wisp particle on the accent
+		local accentAttach = Instance.new("Attachment")
+		accentAttach.Parent = accent
+		local wisp = Instance.new("ParticleEmitter")
+		wisp.Texture = element.particle
+		wisp.Color = ColorSequence.new(element.accentColor)
+		wisp.Size = NumberSequence.new(0.7, 0.1)
+		wisp.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.2),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		wisp.Lifetime = NumberRange.new(0.6, 1.2)
+		wisp.Rate = 12
+		wisp.Speed = NumberRange.new(1, 2)
+		wisp.SpreadAngle = Vector2.new(20, 20)
+		wisp.Acceleration = Vector3.new(0, 2, 0)
+		wisp.Parent = accentAttach
 
 		-- Stacked "PRACTICE" + HP-bar billboard. The HP label updates on hit
 		-- and resets on respawn so the kid sees their upgrade impact.
@@ -606,8 +671,11 @@ local function buildPracticeDummies(parent: Instance)
 		local label = Instance.new("TextLabel")
 		label.Size = UDim2.new(1, 0, 0.55, 0)
 		label.BackgroundTransparency = 1
-		label.Text = "PRACTICE"
-		label.TextColor3 = Color3.fromRGB(220, 220, 220)
+		-- Sprint 8: prefix the billboard with the element name so the
+		-- kid clearly sees they're hitting a Fire / Ice / Lightning
+		-- target. Color matches the dummy's element accent.
+		label.Text = `{string.upper(element.name)} DUMMY`
+		label.TextColor3 = element.accentColor
 		label.TextStrokeTransparency = 0
 		label.Font = Enum.Font.GothamBold
 		label.TextScaled = true
@@ -849,6 +917,76 @@ local function buildInteractionStones(parent: Instance)
 	crystalLight.Brightness = 4
 	crystalLight.Range = 30
 	crystalLight.Parent = crystal
+
+	-- Sprint 8: pulsing rune circle on the floor around the obelisk.
+	-- Adds a "magical interaction point" footprint that's visible from
+	-- across the Lair — kid sees the cyan ring breathing on the floor
+	-- and knows "something's there" before they're close enough to read
+	-- the prompt label. Two concentric rings + a rotating glyph slab so
+	-- the circle has visual layers, not just a flat painted disc.
+	local runeRingOuter = makePart("StatStoneRuneRingOuter", parent, {
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.4, 22, 22),
+		CFrame = CFrame.new(statPos + Vector3.new(0, FLOOR_THICKNESS / 2 + 0.15, 0))
+			* CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(120, 220, 255),
+		Material = Enum.Material.Neon,
+		Transparency = 0.5,
+	})
+	local runeRingInner = makePart("StatStoneRuneRingInner", parent, {
+		Shape = Enum.PartType.Cylinder,
+		Size = Vector3.new(0.4, 14, 14),
+		CFrame = CFrame.new(statPos + Vector3.new(0, FLOOR_THICKNESS / 2 + 0.18, 0))
+			* CFrame.Angles(0, 0, math.rad(90)),
+		Color = Color3.fromRGB(180, 240, 255),
+		Material = Enum.Material.Neon,
+		Transparency = 0.3,
+	})
+	-- Pulse the inner ring's transparency so the circle visibly breathes
+	-- (matches the Stat Stone crystal's vibe).
+	task.spawn(function()
+		while runeRingInner.Parent do
+			local up = TweenService:Create(runeRingInner,
+				TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+				{ Transparency = 0.6 }
+			)
+			up:Play()
+			up.Completed:Wait()
+			if not runeRingInner.Parent then break end
+			local down = TweenService:Create(runeRingInner,
+				TweenInfo.new(2, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+				{ Transparency = 0.2 }
+			)
+			down:Play()
+			down.Completed:Wait()
+		end
+	end)
+	-- Slowly counter-rotating slab between the two rings — pure visual
+	-- "this is glyph runic stuff" texture. Half-stud thick, fits between
+	-- the two ring radii (14 and 22 inner diameters).
+	local runeSlab = makePart("StatStoneRuneSlab", parent, {
+		Shape = Enum.PartType.Block,
+		Size = Vector3.new(18, 0.3, 18),
+		CFrame = CFrame.new(statPos + Vector3.new(0, FLOOR_THICKNESS / 2 + 0.12, 0)),
+		Color = Color3.fromRGB(80, 160, 220),
+		Material = Enum.Material.Neon,
+		Transparency = 0.85,
+	})
+	task.spawn(function()
+		while runeSlab.Parent do
+			local startCF = runeSlab.CFrame
+			for step = 1, 8 do
+				if not runeSlab.Parent then break end
+				local target = startCF * CFrame.Angles(0, math.rad(-45 * step), 0)
+				local stepTween = TweenService:Create(runeSlab,
+					TweenInfo.new(2.0, Enum.EasingStyle.Linear),
+					{ CFrame = target }
+				)
+				stepTween:Play()
+				stepTween.Completed:Wait()
+			end
+		end
+	end)
 
 	-- Smaller orbital crystals that circle the main one. Adds depth +
 	-- "this is special" feeling. Three orbiters at 120° spacing.
