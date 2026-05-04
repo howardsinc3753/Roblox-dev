@@ -72,6 +72,20 @@ LairAtmosphere.init()
 -- demand from the OnClientEvent handler.
 BossTelegraph.init()
 
+-- Sprint 10: boss music swap. Server fires BossMusicState(true) when
+-- Blaze appears, BossMusicState(false) on victory or timeout. The
+-- SoundManager pitch-shifts the existing arena music instead of
+-- swapping to a dedicated track (peer audit guidance — pitch-shift
+-- of existing music carries enough signal for MVP).
+do
+	local bossMusicRemote = remotes:WaitForChild("BossMusicState", 10) :: RemoteEvent?
+	if bossMusicRemote then
+		bossMusicRemote.OnClientEvent:Connect(function(active: boolean)
+			SoundManager.setBossMusicActive(active)
+		end)
+	end
+end
+
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
 -- the cached PlayerData table. Wrapped in pcall + retry because remotes may not

@@ -923,14 +923,20 @@ RoundManager.setCallbacks(
 	-- in the round-end summary payload.
 	-- Sprint 10: pass roundNumber so runWaveSequence can detect Mega-
 	-- Boss-Rounds (every 3rd round) and append a Blaze encounter after
-	-- the standard 3 waves.
+	-- the standard 3 waves. onBossWarning fires the 30s warning banner.
 	function()
 		local roundState = RoundManager.getState()
 		lastRoundWaveResults = NPCManager.runWaveSequence(
 			roundState.roundNumber,
 			fireWaveStateChanged,
 			RoundManager.isActive,
-			awardWaveCleared
+			awardWaveCleared,
+			function(bossType: string, secondsLeft: number)
+				bossBannerStateRemote:FireAllClients("WARNING", {
+					bossType = bossType,
+					secondsLeft = secondsLeft,
+				})
+			end
 		)
 	end,
 
@@ -1140,6 +1146,22 @@ NPCManager.startAILoop(npcDamagePlayer, RoundManager.isActive)
 -- everything else. telegraphCallback fires the BossTelegraph remote
 -- to all clients so the BossTelegraph.luau client renderer can draw
 -- the slam circle / beam preview.
+-- Sprint 10 commit 6: boss-spawned signal. Fires the BLAZE APPEARS
+-- banner state + boss music swap to all clients. Analytics fires
+-- per-player BossEncountered for everyone in the server.
+BossManager.setOnSpawnedCallback(function(bossType: string, maxHealth: number)
+	bossBannerStateRemote:FireAllClients("INCOMING", { bossType = bossType, maxHealth = maxHealth })
+	bossMusicStateRemote:FireAllClients(true)
+	-- Analytics: lights up the BossEncountered event scaffolded in
+	-- Sprint 9a. Fires for every player in the server (including
+	-- Lair-stayers — they SAW the encounter happen via the banner).
+	local roundState = RoundManager.getState()
+	for _, player in Players:GetPlayers() do
+		Analytics.bossEncountered(player, bossType, roundState.roundNumber)
+	end
+	print(`[Server] {bossType} spawned with {maxHealth} HP — banner + music fired`)
+end)
+
 BossManager.setDamageCallback(function(target: Player, damage: number, source: Vector3)
 	-- Lair-hider gate (defense-in-depth): a kid sitting in the Lair
 	-- when Blaze swings shouldn't take damage. Sprint 5 Part D's

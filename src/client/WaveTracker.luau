@@ -234,6 +234,99 @@ local function handleRoundEnd()
 	end
 end
 
+-- ===== Sprint 10: Mega Boss banner states =====
+-- Each state hijacks the WaveTracker pill with boss-specific text and
+-- color theme. Distinct from the wave states so kids see "this is a
+-- different kind of encounter" — Blaze deserves visual ceremony.
+-- Bosstype names map "Blaze" → "BLAZE THE INFERNO LORD" for marquee
+-- impact; future Stage 1.5 reskins (Frostmaul, Voltrix) extend this.
+local BOSS_DISPLAY_NAMES = {
+	Blaze = "BLAZE THE INFERNO LORD",
+}
+
+local function getBossDisplayName(bossType: string): string
+	return BOSS_DISPLAY_NAMES[bossType] or string.upper(bossType)
+end
+
+-- Countdown tween thread for the WARNING state. Captured so a fresh
+-- WARNING (e.g. test scenario, double-fire) can cancel the previous
+-- countdown before starting a new one.
+local warningCountdownThread: thread? = nil
+
+local function handleBossIncoming(payload: any)
+	if not screenGui or not mainBanner then return end
+	screenGui.Enabled = true
+	local bossType = (payload and payload.bossType) or "Blaze"
+	mainBanner.Text = `⚔️  {getBossDisplayName(bossType)}  ⚔️`
+	-- Deeper-red theme than regular wave INCOMING so kids feel the
+	-- weight. Saturation cranked higher.
+	setPanelTheme(Color3.fromRGB(180, 20, 20), Color3.fromRGB(255, 200, 200))
+	showSubtitle("APPEARS!", 4)
+	SoundManager.play("RoundStart") -- repurpose as fanfare for boss arrival
+end
+
+local function handleBossWarning(payload: any)
+	if not screenGui or not mainBanner then return end
+	screenGui.Enabled = true
+	local secondsLeft = (payload and payload.secondsLeft) or 30
+	local bossType = (payload and payload.bossType) or "Blaze"
+	-- Countdown on its own thread so the banner ticks down each second.
+	-- Cancel any prior countdown first to avoid concurrent threads
+	-- writing to mainBanner.
+	if warningCountdownThread then
+		task.cancel(warningCountdownThread)
+		warningCountdownThread = nil
+	end
+	warningCountdownThread = task.spawn(function()
+		for sec = secondsLeft, 1, -1 do
+			if not mainBanner then break end
+			mainBanner.Text = `⏱️  {getBossDisplayName(bossType)} ESCAPING IN {sec}s — FINISH HIM!`
+			-- Pulse between two reds so the banner reads as "urgent"
+			-- without distracting motion. Brightness shifts with second
+			-- parity (every other second).
+			if sec % 2 == 0 then
+				setPanelTheme(Color3.fromRGB(255, 50, 30), Color3.fromRGB(255, 220, 200))
+			else
+				setPanelTheme(Color3.fromRGB(180, 20, 10), Color3.fromRGB(255, 180, 160))
+			end
+			task.wait(1)
+		end
+		warningCountdownThread = nil
+	end)
+end
+
+local function handleBossDefeated(payload: any)
+	if not screenGui or not mainBanner then return end
+	screenGui.Enabled = true
+	local bossType = (payload and payload.bossType) or "Blaze"
+	-- Cancel any in-flight WARNING countdown so it doesn't keep ticking
+	-- after the boss is dead.
+	if warningCountdownThread then
+		task.cancel(warningCountdownThread)
+		warningCountdownThread = nil
+	end
+	mainBanner.Text = `✅  {getBossDisplayName(bossType)} FALLS!`
+	setPanelTheme(Color3.fromRGB(255, 215, 0), Color3.fromRGB(60, 40, 0))
+	flashClear()
+	-- Two stacked reward sounds — this is the climactic moment.
+	SoundManager.play("Coin")
+	SoundManager.play("Special")
+	showSubtitle("Boss defeated! Coins shared by damage contribution.", 5)
+end
+
+local function handleBossTimeout(payload: any)
+	if not screenGui or not mainBanner then return end
+	screenGui.Enabled = true
+	local bossType = (payload and payload.bossType) or "Blaze"
+	if warningCountdownThread then
+		task.cancel(warningCountdownThread)
+		warningCountdownThread = nil
+	end
+	mainBanner.Text = `❌  {getBossDisplayName(bossType)} ESCAPED`
+	setPanelTheme(Color3.fromRGB(80, 80, 90), Color3.fromRGB(180, 180, 190))
+	showSubtitle("Try again next time! Press harder, kids.", 5)
+end
+
 function WaveTracker.init()
 	ensureGui()
 
@@ -262,6 +355,30 @@ function WaveTracker.init()
 			handleResting(waveNum, payload)
 		end
 	end)
+
+	-- Sprint 10: boss banner states. Separate remote from wave state so
+	-- the boss UX can override the wave pill without the wave-state
+	-- handler's logic getting boss-aware. Each state hijacks the pill
+	-- with boss-specific text + theme.
+	local bossBannerStateRemote = remotes:WaitForChild("BossBannerState", 10) :: RemoteEvent?
+	if bossBannerStateRemote then
+		bossBannerStateRemote.OnClientEvent:Connect(function(bossState: string, payload: any)
+			if bossState == "INCOMING" then
+				handleBossIncoming(payload)
+			elseif bossState == "WARNING" then
+				handleBossWarning(payload)
+			elseif bossState == "DEFEATED" then
+				handleBossDefeated(payload)
+			elseif bossState == "TIMEOUT" then
+				handleBossTimeout(payload)
+			end
+		end)
+	end
+
+	-- Sprint 10: boss music swap. The actual SoundManager.setBossMusicActive
+	-- call lives in init.client.luau (where SoundManager is already
+	-- imported); WaveTracker only handles the visual banner. This
+	-- module's job is the pill text/theme, not music routing.
 
 	if roundEndRemote then
 		roundEndRemote.OnClientEvent:Connect(handleRoundEnd)

@@ -252,6 +252,16 @@ function BossManager.setOnTimeoutCallback(cb: (bossType: string, hpRemainingPerc
 	onTimeoutCallback = cb
 end
 
+-- Sprint 10 commit 6: spawn callback. Fires once per successful
+-- BossManager.spawnBlaze, used by init.server.luau to broadcast the
+-- "BLAZE APPEARS" banner + boss-music swap to clients. Same set-once
+-- pattern as the other callbacks.
+local onSpawnedCallback: ((bossType: string, maxHealth: number) -> ())? = nil
+
+function BossManager.setOnSpawnedCallback(cb: (bossType: string, maxHealth: number) -> ())
+	onSpawnedCallback = cb
+end
+
 -- Apply damage to the active boss. Returns (killed, actualDamage).
 -- Records the userId's contribution in damageByUser so the death
 -- payout can split the share pool proportionally. killerUserId is
@@ -502,14 +512,20 @@ local function runBossAITick(state: BossState)
 	end
 end
 
--- Hook spawnBlaze to start the AI tick. We do this by wrapping the
--- existing function rather than mutating its body — keeps the spawn
--- bookkeeping in one place and the AI in another.
+-- Hook spawnBlaze to start the AI tick + fire the spawned callback.
+-- We do this by wrapping the existing function rather than mutating its
+-- body — keeps the spawn bookkeeping in one place and the AI in another.
 local originalSpawnBlaze = BossManager.spawnBlaze
 function BossManager.spawnBlaze(playerCount: number): BossState?
 	local state = originalSpawnBlaze(playerCount)
 	if state then
 		task.spawn(runBossAITick, state)
+		-- Fire the spawned callback AFTER the AI tick is dispatched so
+		-- a slow callback (e.g. the BossBannerState fire-all-clients
+		-- has to serialize) doesn't delay the AI startup.
+		if onSpawnedCallback then
+			onSpawnedCallback(state.bossType, state.maxHealth)
+		end
 	end
 	return state
 end

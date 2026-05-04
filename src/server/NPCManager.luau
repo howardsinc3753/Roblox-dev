@@ -677,11 +677,15 @@ end
 -- can detect Mega-Boss-Rounds (every MEGA_BOSS_CADENCE rounds) and
 -- append a boss wave after the standard NUM_WAVES. RoundManager has
 -- the canonical round number; init.server.luau passes it through.
+-- Sprint 10 commit 6: optional onBossWarning callback fires once when
+-- the boss fight reaches the 30-second-remaining mark. Drives the
+-- "BOSS ESCAPING IN 30s" banner. Optional so older callers don't break.
 function NPCManager.runWaveSequence(
 	roundNumber: number,
 	fireWaveState: (waveNum: number, state: string, payload: any) -> (),
 	isRoundActive: () -> boolean,
-	onWaveCleared: (waveNum: number, coinReward: number) -> ()
+	onWaveCleared: (waveNum: number, coinReward: number) -> (),
+	onBossWarning: ((bossType: string, secondsLeft: number) -> ())?
 ): { WaveResult }
 	local results: { WaveResult } = {}
 
@@ -852,9 +856,21 @@ function NPCManager.runWaveSequence(
 		if boss then
 			local startTime = tick()
 			local timedOut = false
+			-- Track whether the 30-second warning has fired so we don't
+			-- spam it on every poll cycle. One-shot per encounter.
+			local warningFired = false
 			while isRoundActive() and BossManager.isActive() do
 				task.wait(0.5)
-				if tick() - startTime >= MEGA_BOSS_FIGHT_DURATION then
+				local elapsed = tick() - startTime
+				-- Sprint 10 commit 6: fire "BOSS ESCAPING IN 30s" once
+				-- when fight time crosses the warning threshold (60s
+				-- elapsed = 30s remaining out of MEGA_BOSS_FIGHT_DURATION).
+				if not warningFired and onBossWarning
+					and elapsed >= (MEGA_BOSS_FIGHT_DURATION - MEGA_BOSS_WARNING_THRESHOLD) then
+					warningFired = true
+					onBossWarning("Blaze", MEGA_BOSS_WARNING_THRESHOLD)
+				end
+				if elapsed >= MEGA_BOSS_FIGHT_DURATION then
 					timedOut = true
 					break
 				end
