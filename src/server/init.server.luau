@@ -874,8 +874,13 @@ RoundManager.setCallbacks(
 	-- which case runWaveSequence bails out via its isRoundActive() checks).
 	-- Returns the per-wave breakdown which we stash for onRoundEnd to send
 	-- in the round-end summary payload.
+	-- Sprint 10: pass roundNumber so runWaveSequence can detect Mega-
+	-- Boss-Rounds (every 3rd round) and append a Blaze encounter after
+	-- the standard 3 waves.
 	function()
+		local roundState = RoundManager.getState()
 		lastRoundWaveResults = NPCManager.runWaveSequence(
+			roundState.roundNumber,
 			fireWaveStateChanged,
 			RoundManager.isActive,
 			awardWaveCleared

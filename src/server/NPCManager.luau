@@ -24,6 +24,7 @@ local RunService = game:GetService("RunService")
 
 local EnemyConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("EnemyConfig"))
 local ZoneManager = require(script.Parent.ZoneManager)
+local BossManager = require(script.Parent.BossManager)
 
 local NPCManager = {}
 
@@ -64,6 +65,22 @@ local WAVE_DEFS = {
 }
 
 local NUM_WAVES = #WAVE_DEFS
+
+-- Sprint 10: Mega-Boss-Round cadence. Every Nth round, after the
+-- standard NUM_WAVES finish, an additional "Mega Boss" wave runs where
+-- BossManager.spawnBlaze spawns BLAZE THE INFERNO LORD. Cadence of 3
+-- means rounds 3, 6, 9, ... are Mega-Boss-Rounds — peer audit settled
+-- on this rhythm: ~6-9 minutes between encounters with the existing
+-- ~3-min round length.
+local MEGA_BOSS_CADENCE = 3
+-- Total fight window before the boss is force-despawned with no
+-- rewards. 90 seconds gives kids ~60 seconds of actual fighting plus
+-- a 30-second warning window ("BOSS ESCAPING IN 30s") which commit 6
+-- surfaces in the WaveTracker banner. Boss-death exits the loop
+-- earlier; boss timeout = boss "escapes," kids who failed get nothing
+-- (peer audit guidance — failure → learning loop).
+local MEGA_BOSS_FIGHT_DURATION = 90
+local MEGA_BOSS_WARNING_THRESHOLD = 30 -- "ESCAPING IN 30s" fires at this remaining
 
 -- Wave-flow timings. INCOMING is the telegraph window where the banner
 -- shows but no enemies have spawned yet — gives the kid 3 seconds to
@@ -656,7 +673,12 @@ local function countAliveNPCs(): number
 	return n
 end
 
+-- Sprint 10: roundNumber added as first parameter so the wave loop
+-- can detect Mega-Boss-Rounds (every MEGA_BOSS_CADENCE rounds) and
+-- append a boss wave after the standard NUM_WAVES. RoundManager has
+-- the canonical round number; init.server.luau passes it through.
 function NPCManager.runWaveSequence(
+	roundNumber: number,
 	fireWaveState: (waveNum: number, state: string, payload: any) -> (),
 	isRoundActive: () -> boolean,
 	onWaveCleared: (waveNum: number, coinReward: number) -> ()
@@ -806,10 +828,72 @@ function NPCManager.runWaveSequence(
 		end
 	end
 
+	-- ===== Sprint 10: Mega-Boss-Round path =====
+	-- After the standard NUM_WAVES finish, if the round number is a
+	-- multiple of MEGA_BOSS_CADENCE, append a Mega-Boss wave: spawn
+	-- BLAZE THE INFERNO LORD via BossManager, wait for the kid(s) to
+	-- kill it OR the timeout to despawn it. Death/timeout exit paths
+	-- both append a wave result so the round-end summary shows the
+	-- boss outcome. Banner + analytics + rewards land in commits 5-6;
+	-- this commit just gets the encounter to start and end cleanly.
+	--
+	-- Note: BossManager.isActive flips to false either when boss HP
+	-- hits 0 (commit 4 wires player damage in) or when the timeout
+	-- branch below calls despawn(). For commit 3, the kid CAN see the
+	-- boss appear but can't damage it yet (no findHitNPC integration);
+	-- the encounter exits via timeout. That's fine for incremental
+	-- shipping — kid sees the model, knows something's coming.
+	if isRoundActive() and roundNumber % MEGA_BOSS_CADENCE == 0 then
+		print(`[NPCManager] Round {roundNumber} is a Mega-Boss-Round; spawning Blaze`)
+		-- Player-count snapshot at spawn — peer audit explicitly
+		-- guards against dynamic mid-fight rescaling. Locked here.
+		local activePlayerCount = #Players:GetPlayers()
+		local boss = BossManager.spawnBlaze(activePlayerCount)
+		if boss then
+			local startTime = tick()
+			local timedOut = false
+			while isRoundActive() and BossManager.isActive() do
+				task.wait(0.5)
+				if tick() - startTime >= MEGA_BOSS_FIGHT_DURATION then
+					timedOut = true
+					break
+				end
+			end
+			local clearTime = tick() - startTime
+			-- Force despawn if we exited via timeout / round-end with
+			-- the boss still alive. The reward path (commit 5) hooks
+			-- in earlier (intercepts the death moment) so a CLEARED
+			-- exit's despawn happens via the reward path, not here.
+			if BossManager.isActive() then
+				BossManager.despawn()
+			end
+			local status: string
+			if timedOut then
+				status = "TIMEOUT"
+				print(`[NPCManager] Blaze TIMED OUT after {math.floor(clearTime)}s`)
+			elseif not isRoundActive() then
+				status = "ABORTED"
+			else
+				status = "CLEARED"
+				print(`[NPCManager] Blaze CLEARED in {math.floor(clearTime)}s`)
+			end
+			table.insert(results, {
+				waveNum = NUM_WAVES + 1,
+				status = status,
+				clearTime = if status == "CLEARED" then clearTime else nil,
+				isBossWave = true,
+			})
+		end
+	end
+
 	-- Final cleanup: any straggler NPCs (e.g. a Boss whose death animation
 	-- is mid-flight when the loop exits) are despawned so the intermission
-	-- starts visually clean.
+	-- starts visually clean. Defensive Blaze despawn for the rare case
+	-- where we exited the loop with him alive (round force-ended).
 	NPCManager.clearAll()
+	if BossManager.isActive() then
+		BossManager.despawn()
+	end
 	return results
 end
 
