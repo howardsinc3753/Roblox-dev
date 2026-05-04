@@ -213,7 +213,12 @@ function DragonProgression.tryUpgrade(player: Player, dragonId: string, statKey:
 
 	local levels = getOrCreateLevels(player, dragonId)
 	if not levels then release(); return false, nil, nil, "no_data" end
-	local current = (levels :: any)[statKey] :: number
+	-- Bind levels-as-any to a concrete local once. Dynamic statKey index
+	-- needs the `any` cast, but we want to dot-write it on its own line —
+	-- and Lua parses a line starting with `(...)` as a function call on
+	-- the previous expression's result. Concrete local sidesteps that.
+	local levelsAny = levels :: any
+	local current = levelsAny[statKey] :: number
 	if current >= MAX_LEVEL then release(); return false, nil, nil, "max_level" end
 
 	local cost = DragonProgression.getUpgradeCost(current)
@@ -223,7 +228,7 @@ function DragonProgression.tryUpgrade(player: Player, dragonId: string, statKey:
 	-- Mutate: deduct + increment + persist. All three under the lock so a
 	-- concurrent attempt sees the post-deduction state, not the pre-state.
 	data.coins -= cost
-	(levels :: any)[statKey] = current + 1
+	levelsAny[statKey] = current + 1
 	local newLevel = current + 1
 	local newCoins = data.coins
 
@@ -236,8 +241,9 @@ function DragonProgression.tryUpgrade(player: Player, dragonId: string, statKey:
 		-- Roll back the in-memory state so a retry stays consistent. Without
 		-- this rollback, a transient DataStore failure would leave the kid
 		-- with the upgrade applied locally but no DataStore record.
+		-- Reuse levelsAny from above to avoid the paren-prefix parser bug.
 		data.coins += cost
-		(levels :: any)[statKey] = current
+		levelsAny[statKey] = current
 		release()
 		return false, nil, nil, "save_failed"
 	end
