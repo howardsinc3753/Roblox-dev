@@ -36,6 +36,9 @@ local function setup()
 		RemoteNames.DragonStatsUpdated,
 		RemoteNames.DummyHit,
 		RemoteNames.MarkLairTutorialSeen,
+		RemoteNames.BossTelegraph,
+		RemoteNames.BossMusicState,
+		RemoteNames.BossBannerState,
 	}
 
 	for _, name in eventNames do

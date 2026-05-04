@@ -24,6 +24,25 @@ return {
 	-- PlayerData.hasSeenLairTutorial so the welcome hint doesn't replay
 	-- on rejoin. Idempotent: subsequent fires are silent no-ops.
 	MarkLairTutorialSeen = "MarkLairTutorialSeen",
+	-- Sprint 10: Mega Boss attack telegraph. Server fires when Blaze
+	-- starts winding up an attack so the client can render a ground
+	-- marker (red circle for Inferno Slam, red line preview for Magma
+	-- Beam) for windupSec seconds before the hit lands. Payload:
+	--   attackType: "InfernoSlam" | "MagmaBeam"
+	--   originPos: Vector3 (Slam circle center / Beam origin)
+	--   directionOrRadius: Vector3 (Slam: <radius, 0, 0>; Beam: unit dir)
+	--   windupSec: number
+	-- FireAllClients so spectators see the same telegraph.
+	BossTelegraph = "BossTelegraph",
+	-- Sprint 10: boss music swap. Fires twice per Mega-Boss-Round — once
+	-- on encounter (active=true → swap to boss theme) and once on death
+	-- or timeout (active=false → restore zone music). FireAllClients.
+	BossMusicState = "BossMusicState",
+	-- Sprint 10: boss banner state. Drives WaveTracker's boss-specific
+	-- banner ("BLAZE APPEARS" / "ESCAPING IN Ns" / "BLAZE FALLS").
+	-- state: "INCOMING" | "ACTIVE" | "WARNING" | "DEFEATED" | "TIMEOUT"
+	-- payload: { hpFraction?: number, secondsLeft?: number, ... }
+	BossBannerState = "BossBannerState",
 
 	-- Server → Client (RemoteEvents)
 	DamagePlayer = "DamagePlayer",

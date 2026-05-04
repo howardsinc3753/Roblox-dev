@@ -35,6 +35,7 @@ local SafeZoneIndicator = require(script.SafeZoneIndicator)
 local WaveTracker = require(script.WaveTracker)
 local DragonUpgradeUI = require(script.DragonUpgradeUI)
 local LairAtmosphere = require(script.LairAtmosphere)
+local BossTelegraph = require(script.BossTelegraph)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -65,6 +66,11 @@ DragonUpgradeUI.init()
 -- ZoneManager) and shifts global Lighting toward magical-realm purple-gold
 -- when in the Lair, restores Studio baseline when in the Arena.
 LairAtmosphere.init()
+-- Sprint 10: render Mega Boss attack telegraphs (red circle / line
+-- preview) when the server fires the BossTelegraph remote. Subscribes
+-- to the remote internally; spawning the renderer Parts happens on
+-- demand from the OnClientEvent handler.
+BossTelegraph.init()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
