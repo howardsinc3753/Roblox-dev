@@ -441,7 +441,7 @@ local function buildElementArches(parent: Instance)
 			Material = Enum.Material.Slate,
 		})
 		-- Glowing element crystal hung from the center of the beam
-		makePart(`Arch_{element.name}_Crystal`, parent, {
+		local crystal = makePart(`Arch_{element.name}_Crystal`, parent, {
 			Shape = Enum.PartType.Block,
 			Size = Vector3.new(2, 3, 2),
 			CFrame = CFrame.new(archCenter + Vector3.new(0, archHeight / 2 - 2, 0))
@@ -450,6 +450,115 @@ local function buildElementArches(parent: Instance)
 			Material = Enum.Material.Neon,
 			Transparency = 0.1,
 		})
+
+		-- Sprint 8: pulsing PointLight inside the crystal so each arch
+		-- visibly breathes its element color. Brightness tweens 2 → 6 →
+		-- 2 on a ~3 second cycle. Each arch starts on a different phase
+		-- (offset by i * 0.5s) so the six arches don't pulse in lockstep
+		-- — feels like an organic chorus rather than a digital flicker.
+		local archLight = Instance.new("PointLight")
+		archLight.Name = "ArchLight"
+		archLight.Color = element.color
+		archLight.Brightness = 3
+		archLight.Range = 18
+		archLight.Parent = crystal
+		local TweenService = game:GetService("TweenService")
+		task.delay((i - 1) * 0.5, function()
+			while archLight.Parent do
+				local up = TweenService:Create(archLight,
+					TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ Brightness = 7 }
+				)
+				up:Play()
+				up.Completed:Wait()
+				if not archLight.Parent then break end
+				local down = TweenService:Create(archLight,
+					TweenInfo.new(1.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ Brightness = 2 }
+				)
+				down:Play()
+				down.Completed:Wait()
+			end
+		end)
+
+		-- Ground glow circle under each arch — a thin neon disc on the
+		-- floor in the element's color. Reads as "this is a themed area"
+		-- and gives the kid a target to step onto for the walk-through
+		-- particle burst below.
+		local groundGlow = makePart(`Arch_{element.name}_GroundGlow`, parent, {
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(0.4, 16, 16),
+			CFrame = CFrame.new(LAIR_CENTER + Vector3.new(
+				math.cos(angle) * archRadius,
+				FLOOR_THICKNESS / 2 + 0.3,
+				math.sin(angle) * archRadius
+			)) * CFrame.Angles(0, 0, math.rad(90)),
+			Color = element.color,
+			Material = Enum.Material.Neon,
+			Transparency = 0.55,
+		})
+
+		-- Walk-through particle burst: when a player walks within ~6 studs
+		-- of the arch's center on the ground glow disc, fire an element-
+		-- themed particle burst from an Attachment on the disc. Server-
+		-- side proximity check at low frequency (every 0.4s); each burst
+		-- has a 2-second cooldown per player so a kid loitering on the
+		-- disc doesn't spawn endless particles.
+		local burstAttach = Instance.new("Attachment")
+		burstAttach.Name = "BurstAttach"
+		burstAttach.Position = Vector3.new(0, 0, 1) -- sits on the disc surface
+		burstAttach.Parent = groundGlow
+		local burst = Instance.new("ParticleEmitter")
+		burst.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		burst.Color = ColorSequence.new(element.color)
+		burst.Size = NumberSequence.new(2, 0.3)
+		burst.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.1),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		burst.Lifetime = NumberRange.new(0.8, 1.4)
+		burst.Rate = 0 -- emitted in pulses by :Emit() below, not continuously
+		burst.Speed = NumberRange.new(8, 16)
+		burst.SpreadAngle = Vector2.new(80, 80)
+		burst.Acceleration = Vector3.new(0, -3, 0) -- slight gravity arc
+		burst.Parent = burstAttach
+
+		-- Track per-player cooldown via a closure so kids don't trigger
+		-- the burst on every poll cycle.
+		local lastBurstTime: { [number]: number } = {}
+		local archCenterXZ = Vector3.new(
+			LAIR_CENTER.X + math.cos(angle) * archRadius,
+			0,
+			LAIR_CENTER.Z + math.sin(angle) * archRadius
+		)
+		local TRIGGER_RADIUS_SQ = 6 * 6
+		local BURST_COOLDOWN = 2
+		task.spawn(function()
+			while groundGlow.Parent do
+				task.wait(0.4)
+				local now = tick()
+				for _, plr in game:GetService("Players"):GetPlayers() do
+					local char = plr.Character
+					if char and char.PrimaryPart then
+						local pos = char.PrimaryPart.Position
+						-- 2D distance check (ignore Y so kids flying above
+						-- don't trigger the burst — they have to be near
+						-- the floor).
+						local dx = pos.X - archCenterXZ.X
+						local dz = pos.Z - archCenterXZ.Z
+						local distSq = dx * dx + dz * dz
+						local heightDelta = math.abs(pos.Y - (LAIR_CENTER.Y + FLOOR_THICKNESS / 2))
+						if distSq < TRIGGER_RADIUS_SQ and heightDelta < 12 then
+							local last = lastBurstTime[plr.UserId] or 0
+							if now - last > BURST_COOLDOWN then
+								lastBurstTime[plr.UserId] = now
+								burst:Emit(20)
+							end
+						end
+					end
+				end
+			end
+		end)
 	end
 end
 
