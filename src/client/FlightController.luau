@@ -81,6 +81,18 @@ local smoothedVelocity = Vector3.zero
 -- Persists across frames so the wobble is continuous regardless of frame rate.
 local bobTime = 0
 
+-- Sprint 7: cached upgraded speed per dragon. Populated by
+-- applyEffectiveSpeed() when the server fires DragonStatsUpdated. The
+-- speed read in the Heartbeat loop prefers this override over
+-- DragonConfig.speed so a kid's +Spd upgrades visibly affect movement.
+-- Empty until the first server push lands; tickHeartbeat falls back to
+-- DragonConfig in that brief window.
+local speedOverrides: { [string]: number } = {}
+
+function FlightController.applyEffectiveSpeed(dragonId: string, speed: number)
+	speedOverrides[dragonId] = speed
+end
+
 function FlightController.setDragon(dragonId: string)
 	currentDragonId = dragonId
 end
@@ -213,7 +225,11 @@ RunService.Heartbeat:Connect(function(dt: number)
 	local dragon = DragonConfig[currentDragonId]
 	if not dragon then return end
 
-	local baseSpeed = dragon.speed
+	-- Sprint 7: prefer the upgraded-speed override pushed by the server via
+	-- DragonStatsUpdated. Falls back to DragonConfig if no push has landed
+	-- (first frame after spawn before the remote arrives, or if the player
+	-- hasn't bought any +Spd levels — both yield the base value either way).
+	local baseSpeed = speedOverrides[currentDragonId] or dragon.speed
 
 	-- Boost: keyboard Q OR gamepad A (held). Whichever is true wins.
 	local effectiveBoost = boosting or gamepadBoost

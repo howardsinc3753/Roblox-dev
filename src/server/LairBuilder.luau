@@ -73,6 +73,29 @@ local FLOOR_RADIUS = 100
 local FLOOR_THICKNESS = 6
 local PORTAL_DISTANCE_FROM_CENTER = 70 -- portal sits at south edge of disc
 local LAIR_TAG = "DragonWarz_Lair"
+-- Sprint 7: tags so the client (ProximityPrompt) and combat (dummy hit
+-- detection carve-out) can find these instances without hard-coding paths.
+local STAT_STONE_TAG = "DragonWarz_StatStone"
+local SHOP_STONE_TAG = "DragonWarz_ShopStone"
+local PRACTICE_DUMMY_TAG = "DragonWarz_PracticeDummy"
+
+-- Sprint 7: per-dummy HP state. Index = dummy id; entry = { part, maxHp,
+-- currentHp, alive }. Damage path mutates currentHp; when it hits 0, the
+-- dummy goes invisible + non-targetable for 3 seconds then "respawns".
+-- Module-level so the fireBreath carve-out (separate commit) can call
+-- damageDummy without LairBuilder needing to share state via globals.
+local DUMMY_MAX_HP = 100
+local DUMMY_RESPAWN_SEC = 3
+type DummyState = {
+	id: number,
+	part: BasePart,
+	billboard: BillboardGui,
+	hpLabel: TextLabel,
+	maxHp: number,
+	currentHp: number,
+	alive: boolean,
+}
+local dummies: { DummyState } = {}
 
 LairBuilder.LAIR_CENTER = LAIR_CENTER
 LairBuilder.FLOOR_RADIUS = FLOOR_RADIUS
@@ -310,8 +333,12 @@ local function buildElementArches(parent: Instance)
 	end
 end
 
--- Practice dummies: 3 simple humanoid-shaped targets. Sprint 7 wires them
--- to take damage + heal; for V1 they're just visual placeholders.
+-- Practice dummies: 3 simple humanoid-shaped targets. Sprint 7 makes them
+-- functional — each takes damage from a Lair-shooter's breath, shows a
+-- floating "-N" + HP bar, and "respawns" after a 3-second KO. The
+-- fireBreath carve-out that routes Lair-shooter cones into damageDummy
+-- ships in a SEPARATE commit (peer audit guidance — that's the only Sprint
+-- 7 change touching the safe-zone gate so it gets blast-radius isolation).
 local function buildPracticeDummies(parent: Instance)
 	for i = 1, 3 do
 		local angle = math.rad(60 + i * 50) -- arc on one side of the lair
@@ -320,14 +347,18 @@ local function buildPracticeDummies(parent: Instance)
 			FLOOR_THICKNESS / 2 + 5,
 			math.sin(angle) * 50
 		)
-		-- Body
-		makePart(`Dummy_{i}_Body`, parent, {
+		-- Body. Tagged + collectible so server-side cone hit detection (in
+		-- the fireBreath carve-out) can identify a hit on a dummy. The body
+		-- is the canonical "target part" for the cone test — ignore the head
+		-- so we only count one hit per breath even if both parts are in cone.
+		local body = makePart(`Dummy_{i}_Body`, parent, {
 			Size = Vector3.new(4, 5, 4),
 			CFrame = CFrame.new(pos),
 			Color = Color3.fromRGB(150, 100, 80),
 			Material = Enum.Material.Wood,
 		})
-		-- Head
+		CollectionService:AddTag(body, PRACTICE_DUMMY_TAG)
+		-- Head — visual only, NOT tagged (only the body is the cone target)
 		makePart(`Dummy_{i}_Head`, parent, {
 			Shape = Enum.PartType.Ball,
 			Size = Vector3.new(3, 3, 3),
@@ -335,14 +366,16 @@ local function buildPracticeDummies(parent: Instance)
 			Color = Color3.fromRGB(200, 150, 120),
 			Material = Enum.Material.Wood,
 		})
-		-- Floating "PRACTICE" label
+
+		-- Stacked "PRACTICE" + HP-bar billboard. The HP label updates on hit
+		-- and resets on respawn so the kid sees their upgrade impact.
 		local billboard = Instance.new("BillboardGui")
-		billboard.Size = UDim2.fromOffset(120, 30)
-		billboard.StudsOffset = Vector3.new(0, 4, 0)
-		billboard.Adornee = parent:FindFirstChild(`Dummy_{i}_Head`)
+		billboard.Size = UDim2.fromOffset(140, 50)
+		billboard.StudsOffset = Vector3.new(0, 5, 0)
+		billboard.Adornee = body
 		billboard.Parent = parent
 		local label = Instance.new("TextLabel")
-		label.Size = UDim2.fromScale(1, 1)
+		label.Size = UDim2.new(1, 0, 0.55, 0)
 		label.BackgroundTransparency = 1
 		label.Text = "PRACTICE"
 		label.TextColor3 = Color3.fromRGB(220, 220, 220)
@@ -350,7 +383,93 @@ local function buildPracticeDummies(parent: Instance)
 		label.Font = Enum.Font.GothamBold
 		label.TextScaled = true
 		label.Parent = billboard
+		local hpLabel = Instance.new("TextLabel")
+		hpLabel.Name = "HpLabel"
+		hpLabel.Size = UDim2.new(1, 0, 0.45, 0)
+		hpLabel.Position = UDim2.fromScale(0, 0.55)
+		hpLabel.BackgroundTransparency = 1
+		hpLabel.Text = `{DUMMY_MAX_HP} / {DUMMY_MAX_HP} HP`
+		hpLabel.TextColor3 = Color3.fromRGB(150, 220, 150)
+		hpLabel.TextStrokeTransparency = 0
+		hpLabel.Font = Enum.Font.Gotham
+		hpLabel.TextScaled = true
+		hpLabel.Parent = billboard
+
+		table.insert(dummies, {
+			id = i,
+			part = body,
+			billboard = billboard,
+			hpLabel = hpLabel,
+			maxHp = DUMMY_MAX_HP,
+			currentHp = DUMMY_MAX_HP,
+			alive = true,
+		})
 	end
+end
+
+-- Sprint 7: cone hit detection against practice dummies. Mirrors the
+-- CombatManager.findHitPlayer/findHitNPC pattern so the carve-out commit
+-- can plug this in symmetrically. Returns the closest dummy in the cone
+-- or nil. Range matches breath range (100 studs); the dummy positions
+-- are within ~50 studs of the Lair center so this is generous.
+local DUMMY_BREATH_RANGE = 100
+function LairBuilder.findHitDummy(origin: Vector3, direction: Vector3): DummyState?
+	if direction.Magnitude < 0.001 then return nil end
+	local dirUnit = direction.Unit
+	local closest: DummyState? = nil
+	local closestDist = DUMMY_BREATH_RANGE
+	for _, dummy in dummies do
+		if dummy.alive then
+			local toTarget = dummy.part.Position - origin
+			local dist = toTarget.Magnitude
+			if dist < closestDist then
+				local dot = toTarget.Unit:Dot(dirUnit)
+				if dot > 0.85 then -- match findHitPlayer's ~30 degree cone
+					closestDist = dist
+					closest = dummy
+				end
+			end
+		end
+	end
+	return closest
+end
+
+-- Sprint 7: apply damage to a dummy. Returns the post-hit HP so the
+-- carve-out can fire the DummyHit remote with the right number for the
+-- floating damage label. KO at HP <= 0 → 3-second invisible respawn.
+function LairBuilder.damageDummy(dummy: DummyState, amount: number): number
+	if not dummy.alive then return 0 end
+	dummy.currentHp = math.max(0, dummy.currentHp - amount)
+	dummy.hpLabel.Text = `{dummy.currentHp} / {dummy.maxHp} HP`
+
+	-- Color-tint HP label: green (full) → yellow (half) → red (low) so the
+	-- kid sees how close to KO at a glance.
+	local hpFrac = dummy.currentHp / dummy.maxHp
+	if hpFrac > 0.6 then
+		dummy.hpLabel.TextColor3 = Color3.fromRGB(150, 220, 150)
+	elseif hpFrac > 0.3 then
+		dummy.hpLabel.TextColor3 = Color3.fromRGB(255, 220, 100)
+	else
+		dummy.hpLabel.TextColor3 = Color3.fromRGB(255, 120, 120)
+	end
+
+	if dummy.currentHp <= 0 then
+		-- KO: hide body + billboard, respawn after DUMMY_RESPAWN_SEC. The
+		-- alive flag gates findHitDummy so a downed dummy can't be hit.
+		dummy.alive = false
+		dummy.part.Transparency = 1
+		dummy.billboard.Enabled = false
+		task.delay(DUMMY_RESPAWN_SEC, function()
+			-- Same dummy table — ResetOnSpawn doesn't apply to non-Player parts.
+			dummy.currentHp = dummy.maxHp
+			dummy.alive = true
+			dummy.part.Transparency = 0
+			dummy.billboard.Enabled = true
+			dummy.hpLabel.Text = `{dummy.maxHp} / {dummy.maxHp} HP`
+			dummy.hpLabel.TextColor3 = Color3.fromRGB(150, 220, 150)
+		end)
+	end
+	return dummy.currentHp
 end
 
 -- Stat Stone obelisk + Shop Stone obelisk. Tries to load the Roblox
@@ -410,6 +529,25 @@ local function buildInteractionStones(parent: Instance)
 	sl.TextScaled = true
 	sl.Parent = statLabel
 
+	-- Sprint 7: tag + ProximityPrompt. Tag lets the client locate this
+	-- specific obelisk via CollectionService. ProximityPrompt fires
+	-- Triggered on both server AND client when the kid presses E within
+	-- range; the client opens DragonUpgradeUI on its side. Range 6 is
+	-- intentionally tighter than Roblox's default 10 so the kid has to
+	-- WALK UP to the stone — generous enough to feel forgiving but not
+	-- so generous they accidentally trigger from across the lair (peer
+	-- audit #13). RequiresLineOfSight prevents through-wall triggers.
+	CollectionService:AddTag(statStone, STAT_STONE_TAG)
+	local prompt = Instance.new("ProximityPrompt")
+	prompt.Name = "StatStonePrompt"
+	prompt.ActionText = "Upgrade Dragon"
+	prompt.ObjectText = "Stat Stone"
+	prompt.KeyboardKeyCode = Enum.KeyCode.E
+	prompt.MaxActivationDistance = 6
+	prompt.RequiresLineOfSight = true
+	prompt.HoldDuration = 0
+	prompt.Parent = statStone
+
 	-- Shop Stone (right of pillar) — same obelisk asset, mirror position
 	local shopPos = LAIR_CENTER + Vector3.new(50, FLOOR_THICKNESS / 2, 0)
 	local shopHero = loadHeroPiece(OBELISK_ASSET, CFrame.new(shopPos), 1)
@@ -444,13 +582,19 @@ local function buildInteractionStones(parent: Instance)
 		Material = Enum.Material.Neon,
 		Transparency = 0.3,
 	})
+	-- Sprint 7: tag the shop stone (mostly so future Sprint 9 work can find
+	-- it via CollectionService too) and add a "🔒 Coming Soon" sub-label so
+	-- a kid who walks up + presses E doesn't bounce off thinking the
+	-- obelisk is broken. The Stat Stone has the upgrade prompt; the Shop
+	-- Stone is intentionally signposted as a future feature.
+	CollectionService:AddTag(shopStone, SHOP_STONE_TAG)
 	local shopLabel = Instance.new("BillboardGui")
-	shopLabel.Size = UDim2.fromOffset(140, 40)
+	shopLabel.Size = UDim2.fromOffset(160, 56)
 	shopLabel.StudsOffset = Vector3.new(0, 9, 0)
 	shopLabel.Adornee = shopStone
 	shopLabel.Parent = parent
 	local shl = Instance.new("TextLabel")
-	shl.Size = UDim2.fromScale(1, 1)
+	shl.Size = UDim2.new(1, 0, 0.55, 0)
 	shl.BackgroundTransparency = 1
 	shl.Text = "SHOP"
 	shl.TextColor3 = Color3.fromRGB(255, 215, 80)
@@ -458,6 +602,16 @@ local function buildInteractionStones(parent: Instance)
 	shl.Font = Enum.Font.GothamBlack
 	shl.TextScaled = true
 	shl.Parent = shopLabel
+	local shlSub = Instance.new("TextLabel")
+	shlSub.Size = UDim2.new(1, 0, 0.45, 0)
+	shlSub.Position = UDim2.fromScale(0, 0.55)
+	shlSub.BackgroundTransparency = 1
+	shlSub.Text = "🔒 Coming Soon"
+	shlSub.TextColor3 = Color3.fromRGB(200, 180, 140)
+	shlSub.TextStrokeTransparency = 0.3
+	shlSub.Font = Enum.Font.GothamBold
+	shlSub.TextScaled = true
+	shlSub.Parent = shopLabel
 end
 
 -- Portal disc to Arena. Visual only in Part A — Part E adds the Touched

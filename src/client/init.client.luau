@@ -33,6 +33,7 @@ local ControlsOverlay = require(script.ControlsOverlay)
 local TipManager = require(script.TipManager)
 local SafeZoneIndicator = require(script.SafeZoneIndicator)
 local WaveTracker = require(script.WaveTracker)
+local DragonUpgradeUI = require(script.DragonUpgradeUI)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -55,6 +56,10 @@ SafeZoneIndicator.init()
 -- Sprint 6: wave-state HUD (incoming banner / counter / countdown).
 -- Self-contained ScreenGui so a syntax error here can't take HUD down.
 WaveTracker.init()
+-- Sprint 7: stat-upgrade modal. Built once (.create), opened on demand
+-- (.open) from the Stat Stone's ProximityPrompt handler below.
+DragonUpgradeUI.create()
+DragonUpgradeUI.init()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
@@ -70,6 +75,11 @@ task.spawn(function()
 	end)
 	if ok and data then
 		DragonSelectUI.updatePlayerData(data)
+		-- Sprint 7: feed the upgrade modal too so it knows which dragons are
+		-- unlocked, the kid's coin balance, current selection, upgrade levels,
+		-- and tutorial-seen flag — without these, opening the modal renders
+		-- empty stat rows for every dragon.
+		DragonUpgradeUI.updatePlayerData(data)
 		-- Retention: show welcome banner with daily login bonus + streak.
 		-- Server populated welcomeBonus in DataManager.processLogin. Banner
 		-- self-throttles to once-per-session via internal flag.
@@ -118,6 +128,9 @@ spawnDragonRemote.OnClientEvent:Connect(function(dragonId: string)
 	FlightController.setDragon(dragonId)
 	CombatInput.setDragon(dragonId)
 	HUD.setDragon(dragonId)
+	-- Sprint 7: tell the upgrade modal which dragon the kid is currently
+	-- flying so opening the modal defaults to "their" dragon's tab.
+	DragonUpgradeUI.setSelectedDragon(dragonId)
 
 	task.defer(function()
 		local character = player.Character or player.CharacterAdded:Wait()
@@ -142,8 +155,41 @@ end)
 updateCoinsRemote.OnClientEvent:Connect(function(coins: number)
 	HUD.updateCoins(coins)
 	DragonSelectUI.updateCoins(coins)
+	-- Sprint 7: keep the upgrade modal's cached coin count fresh so the
+	-- "+ N 🪙" buttons recompute affordability immediately on every coin
+	-- change (kill reward, wave-clear bonus, post-round payout).
+	DragonUpgradeUI.updateCoins(coins)
 	SoundManager.play("Coin")
 end)
+
+-- Sprint 7: server pushes upgraded stats for a specific dragon. Drives:
+--   - DragonUpgradeUI panel (rerender stat rows with new level + cost)
+--   - HUD "Lv N" badge (only if the upgraded dragon is the one the player
+--     is currently flying — tracked via currentDragonId on the client)
+--   - FlightController speed cache (so +Spd upgrades take effect on
+--     movement immediately, not only after dragon switch / respawn)
+do
+	local statsRemote = remotes:WaitForChild("DragonStatsUpdated", 10) :: RemoteEvent?
+	if statsRemote then
+		statsRemote.OnClientEvent:Connect(function(dragonId: string, levels: any, effective: any)
+			DragonUpgradeUI.updateStats(dragonId, levels, effective)
+			-- Apply speed override to the flight controller so a +Spd
+			-- upgrade visibly affects movement without a respawn (peer #6).
+			if effective and effective.speed then
+				FlightController.applyEffectiveSpeed(dragonId, effective.speed)
+			end
+			-- Update the HUD "Lv N" badge ONLY when the upgraded dragon is
+			-- the one the kid is flying. currentDragonId is updated by the
+			-- existing SpawnDragon handler, so this comparison is correct
+			-- as long as those events arrive in order — which they do
+			-- (server fires SpawnDragon before DragonStatsUpdated in
+			-- processPlayer + selectDragon paths).
+			if effective and effective.totalLevel and dragonId == currentDragonId then
+				HUD.setDragonLevel(effective.totalLevel)
+			end
+		end)
+	end
+end
 
 -- Reusable floating damage number — used for both player hits and NPC hits.
 -- Adornee accepts any BasePart so we can show numbers above NPC root parts too.
@@ -825,6 +871,30 @@ do
 	local hintCorner = Instance.new("UICorner")
 	hintCorner.CornerRadius = UDim.new(0, 6)
 	hintCorner.Parent = hint
+end
+
+-- Sprint 7: bind the Lair Stat Stone's ProximityPrompt to open the
+-- upgrade modal. Server creates the prompt under each tagged Stat Stone
+-- in LairBuilder; we connect to its Triggered signal client-side.
+-- CollectionService:GetInstanceAddedSignal handles late-build cases
+-- (server still loading hero asset when this client init runs).
+do
+	local CollectionService = game:GetService("CollectionService")
+	local STAT_STONE_TAG = "DragonWarz_StatStone"
+	local function bindStatStone(part: Instance)
+		local prompt = part:FindFirstChildWhichIsA("ProximityPrompt")
+		if not prompt then return end
+		prompt.Triggered:Connect(function(triggerPlayer: Player)
+			-- Triggered fires for every player on a server-created prompt;
+			-- only the local player should open their UI. Filter here.
+			if triggerPlayer ~= player then return end
+			DragonUpgradeUI.open()
+		end)
+	end
+	for _, part in CollectionService:GetTagged(STAT_STONE_TAG) do
+		bindStatStone(part)
+	end
+	CollectionService:GetInstanceAddedSignal(STAT_STONE_TAG):Connect(bindStatStone)
 end
 
 print(`[Client] {player.Name} Dragon Warz client ready!`)

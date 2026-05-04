@@ -35,6 +35,7 @@ local specialNameLabel: TextLabel -- e.g. "FIRE VORTEX"
 local specialEffectLabel: TextLabel -- e.g. "DMG: 30" or "HEAL +40"
 local specialReadyStroke: UIStroke -- pulsing glow border when ready
 local dragonNameLabel: TextLabel
+local dragonLevelLabel: TextLabel
 -- Button-prompt labels in the cooldown panels. Module-level so the live
 -- LastInputTypeChanged hook can swap them between KB+M ("LMB"/"E") and
 -- gamepad ("RT"/"LT") and touch ("TAP") as the player switches devices.
@@ -245,6 +246,34 @@ function HUD.create()
 	dragonNameLabel.Font = Enum.Font.GothamBold
 	dragonNameLabel.TextScaled = true
 	dragonNameLabel.Parent = screenGui
+
+	-- Sprint 7: dragon level badge (sum of stat upgrade levels for this
+	-- dragon). Tucks into the same top-left card next to the dragon name
+	-- so the kid's progression is constantly visible during gameplay —
+	-- without this, a kid who spent 800 coins on Atk Lv 5 has no in-combat
+	-- visual cue that they're stronger (peer audit #2). Hidden until
+	-- HUD.setDragonLevel is called with a non-zero level so a fresh
+	-- account doesn't display "Lv 0".
+	dragonLevelLabel = Instance.new("TextLabel")
+	dragonLevelLabel.Name = "DragonLevel"
+	dragonLevelLabel.Size = UDim2.fromOffset(70, 28)
+	dragonLevelLabel.Position = UDim2.new(0, 264, 0, 16)
+	dragonLevelLabel.BackgroundColor3 = Color3.fromRGB(80, 60, 30)
+	dragonLevelLabel.BackgroundTransparency = 0.15
+	dragonLevelLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	dragonLevelLabel.Text = "Lv 0"
+	dragonLevelLabel.Font = Enum.Font.GothamBlack
+	dragonLevelLabel.TextSize = 16
+	dragonLevelLabel.Visible = false
+	dragonLevelLabel.Parent = screenGui
+	local levelCorner = Instance.new("UICorner")
+	levelCorner.CornerRadius = UDim.new(0, 6)
+	levelCorner.Parent = dragonLevelLabel
+	local levelStroke = Instance.new("UIStroke")
+	levelStroke.Color = Color3.fromRGB(255, 215, 0)
+	levelStroke.Thickness = 1
+	levelStroke.Transparency = 0.4
+	levelStroke.Parent = dragonLevelLabel
 
 	local nameCorner = Instance.new("UICorner")
 	nameCorner.CornerRadius = UDim.new(0, 8)
@@ -593,6 +622,13 @@ function HUD.setDragon(dragonId: string)
 		dragonNameLabel.Text = `{dragon.name} ({dragon.element})`
 		dragonNameLabel.TextColor3 = dragon.color
 	end
+	-- Sprint 7: dragon switched, reset the level badge to hidden until the
+	-- next DragonStatsUpdated for this dragon arrives. Without this, the
+	-- old dragon's level lingers on the new dragon's name. The server fires
+	-- DragonStatsUpdated immediately after SpawnDragon so the gap is brief.
+	if dragonLevelLabel then
+		dragonLevelLabel.Visible = false
+	end
 	if specialNameLabel then
 		specialNameLabel.Text = string.upper(dragon.specialName)
 	end
@@ -604,6 +640,21 @@ function HUD.setDragon(dragonId: string)
 	if specialCooldownFrame then
 		specialCooldownFrame.BackgroundColor3 = dragon.secondaryColor
 	end
+end
+
+-- Sprint 7: set the active dragon's total upgrade level (sum of atk + def
+-- + spd + special levels, range 0-20). Called from init.client.luau when
+-- DragonStatsUpdated arrives for the player's currently-selected dragon.
+-- Hides the badge at level 0 so a fresh-account kid doesn't see "Lv 0"
+-- (which reads as "you have nothing yet" — discouraging).
+function HUD.setDragonLevel(totalLevel: number)
+	if not dragonLevelLabel then return end
+	if totalLevel <= 0 then
+		dragonLevelLabel.Visible = false
+		return
+	end
+	dragonLevelLabel.Visible = true
+	dragonLevelLabel.Text = `Lv {totalLevel}`
 end
 
 -- Animation phase for the "ready" pulse. tick()-based so it's frame-rate

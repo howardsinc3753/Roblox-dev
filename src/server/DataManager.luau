@@ -20,19 +20,37 @@ local SAVE_INTERVAL = 60
 -- a separate temporary DataStore session), so this only changes initial
 -- defaults, not subsequent loads.
 --
--- Set the `STUDIO_FRESH_PLAYER` workspace attribute to `true` in Studio to
--- bypass these overrides and QA the genuine "Day 1, 0 coins, 2 dragons" UX
--- (banner copy, dragon-locked states, etc). Toggle: in Studio Properties of
--- workspace, add a Boolean attribute named STUDIO_FRESH_PLAYER, check it.
+-- Workspace attribute toggles (set in Studio Properties → Attributes):
+--   STUDIO_FRESH_PLAYER (bool) — bypass ALL overrides and QA the genuine
+--     "Day 1, 0 coins, 2 dragons, 0 upgrades" new-player UX. Takes
+--     precedence over every other Studio toggle. Use this when testing
+--     the welcome banner, locked dragons, first-Lair tutorial, etc.
+--   STUDIO_MAXED_UPGRADES (bool) — Sprint 7: max all stat upgrades on all
+--     dragons so the combat balance can be tested at the upgrade ceiling.
+--     Mutually exclusive with FRESH_PLAYER (which wins).
 local STUDIO_TEST_COINS = 1000
 local function applyStudioOverrides(data: PlayerDataTemplate.PlayerData)
 	if not RunService:IsStudio() then return end
+	-- FRESH_PLAYER short-circuits everything: leaves data exactly as-saved
+	-- (or as-default for new accounts) so the kid sees the real new-player
+	-- flow. Don't add code paths after this return without thinking through
+	-- the FRESH_PLAYER intent.
 	if workspace:GetAttribute("STUDIO_FRESH_PLAYER") == true then return end
 	for dragonId in DragonConfig do
 		data.unlockedDragons[dragonId] = true
 	end
 	if data.coins < STUDIO_TEST_COINS then
 		data.coins = STUDIO_TEST_COINS
+	end
+	-- Sprint 7: max upgrades for combat-balance testing. Off by default —
+	-- the standard Studio override above just unlocks dragons + grants
+	-- coins, so QA still has to spend coins through the upgrade UI to
+	-- exercise the purchase flow. Flip this toggle when testing how
+	-- maxed-out combat feels (boss-wave damage thresholds, speed cap, etc).
+	if workspace:GetAttribute("STUDIO_MAXED_UPGRADES") == true then
+		for dragonId in DragonConfig do
+			data.dragonUpgrades[dragonId] = { atk = 5, def = 5, spd = 5, special = 5 }
+		end
 	end
 end
 

@@ -20,6 +20,7 @@ local NPCManager = require(script.NPCManager)
 local RateLimiter = require(script.RateLimiter)
 local LairBuilder = require(script.LairBuilder)
 local ZoneManager = require(script.ZoneManager)
+local DragonProgression = require(script.DragonProgression)
 local CollectionService = game:GetService("CollectionService")
 
 -- Disable Roblox's default character auto-spawn. Without this, Roblox
@@ -101,6 +102,10 @@ local lockedByEnemyRemote = getRemote("LockedByEnemy")
 local useShieldRemote = getRemote("UseShield")
 local shieldActivatedRemote = getRemote("ShieldActivated")
 local waveStateChangedRemote = getRemote("WaveStateChanged")
+local upgradeStatRemote = getRemote("UpgradeStat")
+local dragonStatsUpdatedRemote = getRemote("DragonStatsUpdated")
+local dummyHitRemote = getRemote("DummyHit")
+local markLairTutorialSeenRemote = getRemote("MarkLairTutorialSeen")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 
 -- ================================
@@ -151,6 +156,17 @@ local function refreshLeaderstats(player: Player)
 	end
 end
 
+-- Sprint 7: helper that pushes the player's current effective stats + upgrade
+-- levels for a specific dragon. Called from PlayerAdded (so client caches
+-- start populated), SelectDragon (so the new dragon's stats land before
+-- combat), and the UpgradeStat handler (so upgrades reflect immediately
+-- in the UI + speed cache).
+local function fireDragonStatsUpdated(player: Player, dragonId: string)
+	local levels = DragonProgression.getLevels(player, dragonId)
+	local effective = DragonProgression.getEffectiveStats(player, dragonId)
+	dragonStatsUpdatedRemote:FireClient(player, dragonId, levels, effective)
+end
+
 -- Sprint 6 playtest fix: was a single inline PlayerAdded handler, now
 -- factored into a function + catch-up loop. The bug it fixes: server
 -- boot is triggered by the first player joining, but ArenaBuilder.build()
@@ -198,6 +214,11 @@ local function processPlayer(player: Player)
 	-- Send initial data to client (coins now include the daily bonus)
 	updateCoinsRemote:FireClient(player, data.coins)
 	spawnDragonRemote:FireClient(player, dragonId)
+	-- Sprint 7: prime the client's stats cache so FlightController applies
+	-- upgraded speed on this very first spawn (without this, the kid would
+	-- spawn at the base DragonConfig speed regardless of their +Spd levels
+	-- until the first upgrade or dragon switch fires the remote).
+	fireDragonStatsUpdated(player, dragonId)
 end
 
 Players.PlayerAdded:Connect(processPlayer)
@@ -238,6 +259,10 @@ selectDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 	CombatManager.initPlayer(player, id)
 	spawnInLair(player, id)
 	spawnDragonRemote:FireClient(player, id)
+	-- Sprint 7: switch dragons → push the new dragon's effective stats
+	-- so the client's cache (FlightController speed, HUD level, etc.)
+	-- matches the body the player is now flying.
+	fireDragonStatsUpdated(player, id)
 end)
 
 -- Dragon unlock
@@ -258,6 +283,70 @@ unlockDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 	data.unlockedDragons[id] = true
 	updateCoinsRemote:FireClient(player, data.coins)
 	print(`[Server] {player.Name} unlocked {id}!`)
+end)
+
+-- Sprint 7: stat upgrade purchase. The hard work (atomic deduct, per-player
+-- race lock, force-save) lives in DragonProgression.tryUpgrade — this
+-- handler just rate-limits, validates ownership, dispatches, and broadcasts
+-- the result so the client UI + combat state stay in sync.
+
+upgradeStatRemote.OnServerEvent:Connect(function(player: Player, dragonIdRaw: unknown, statKeyRaw: unknown)
+	-- 3/sec is plenty — the audit flagged a kid double-clicking the +Atk
+	-- button as the realistic abuse vector, not a sustained spam.
+	if not RateLimiter.check(player, "UpgradeStat", 3) then return end
+	if typeof(dragonIdRaw) ~= "string" then return end
+	if typeof(statKeyRaw) ~= "string" then return end
+	local dragonId = dragonIdRaw :: string
+	local statKey = statKeyRaw :: string
+
+	-- Ownership: can't upgrade a dragon you don't own. Silent reject so a
+	-- compromised client can't probe which dragons exist.
+	local data = DataManager.getData(player)
+	if not data or not data.unlockedDragons[dragonId] then return end
+
+	local success, newLevel, newCoins, errReason = DragonProgression.tryUpgrade(player, dragonId, statKey)
+	if not success then
+		-- Silent fail for MVP. The client may have raced with another upgrade
+		-- attempt or with a coin deduction from elsewhere; the upcoming
+		-- DragonStatsUpdated push (or the kid's next interaction) will
+		-- reconcile the UI. errReason is captured for future logging /
+		-- client-side error toasts if QA reveals confused players.
+		_ = errReason
+		return
+	end
+
+	-- Sync coin balance + Roblox top-right leaderstats. The HUD coin display
+	-- updates from updateCoinsRemote; leaderstats updates from refreshLeaderstats.
+	updateCoinsRemote:FireClient(player, newCoins or 0)
+	refreshLeaderstats(player)
+
+	-- Push the new levels + effective stats to the client. Drives:
+	--  - DragonUpgradeUI panel (rerender stat row with new level + cost)
+	--  - HUD "Lv N" indicator (if upgraded dragon == active dragon)
+	--  - FlightController speed cache (if upgraded dragon == active dragon)
+	fireDragonStatsUpdated(player, dragonId)
+
+	-- Live combat-state apply: if the upgraded dragon is the kid's active one,
+	-- the buff lands immediately — no death/respawn required. Health upgrades
+	-- bump maxHealth + heal the delta; damage upgrades affect the next breath.
+	-- See CombatManager.applyLiveStatChange.
+	if data.selectedDragon == dragonId then
+		CombatManager.applyLiveStatChange(player)
+	end
+
+	print(`[Server] {player.Name} upgraded {dragonId}/{statKey} to lv{newLevel}; coins now {newCoins}`)
+end)
+
+-- Sprint 7: idempotent flag flip — first time the kid opens the Stat Stone
+-- modal, the client fires this so the "💡 Earn coins by killing..." tutorial
+-- hint doesn't replay on rejoin. Force-save so the flag survives a quit.
+markLairTutorialSeenRemote.OnServerEvent:Connect(function(player: Player)
+	if not RateLimiter.check(player, "MarkLairTutorialSeen", 2) then return end
+	local data = DataManager.getData(player)
+	if not data then return end
+	if data.hasSeenLairTutorial then return end -- already flipped, no-op
+	data.hasSeenLairTutorial = true
+	DataManager.savePlayer(player)
 end)
 
 -- Lock-on relay: client reports its current lock target. Server forwards
@@ -337,7 +426,10 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 			and hitPlayer.Character.PrimaryPart.Position
 			or origin :: Vector3
 		local hitDist = (hitTargetPos - origin :: Vector3).Magnitude
-		local falloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(hitDist))
+		-- Sprint 7: read damage from per-player CombatState (folds in upgrade
+		-- bonuses) instead of DragonConfig directly so the kid's Atk-stat
+		-- investments actually scale their breath damage.
+		local falloffDmg = math.floor(state.damage * CombatManager.distanceFalloff(hitDist))
 		local travelTime = math.min(hitDist / PROJECTILE_SPEED, TRAVEL_CAP)
 
 		-- Capture shooter position now (before delay) so the damage-direction
@@ -390,7 +482,8 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 		CombatManager.recordDamageDealt(player) -- pause attacker's HP regen (NPC kills count too)
 		-- Same falloff curve for NPCs — consistent skill expression.
 		local npcDist = (hitNpc.rootPart.Position - origin :: Vector3).Magnitude
-		local npcFalloffDmg = math.floor(dragon.damage * CombatManager.distanceFalloff(npcDist))
+		-- Sprint 7: same upgrade-aware damage source as the player-hit branch.
+		local npcFalloffDmg = math.floor(state.damage * CombatManager.distanceFalloff(npcDist))
 		local npcTravelTime = math.min(npcDist / PROJECTILE_SPEED, TRAVEL_CAP)
 
 		-- Same predictive-hit pattern as players. NPCManager.applyDamage
@@ -448,7 +541,10 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 		-- self-centered burst.
 		local FIRE_CONE_RANGE = 60
 		local FIRE_CONE_DOT = 0.7 -- ~45-degree half-angle = 90 deg cone
-		local fireDmg = dragon.damage * 2
+		-- Sprint 7: specialDamage folds the Special-stat upgrade into the
+		-- vortex's burst. Multiplier of 2 stays — base damage 15 + Special
+		-- +25 max gives 80 max vortex damage (was 60 pre-upgrade).
+		local fireDmg = state.specialDamage * 2
 
 		local conePlayers = CombatManager.findPlayersInCone(pos, forward, FIRE_CONE_RANGE, FIRE_CONE_DOT, player)
 		for _, target in conePlayers do
@@ -500,8 +596,11 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 			if hitCount >= 3 then break end
 			hitCount += 1
 			CombatManager.recordDamageDealt(player)
-			local killed, _ = CombatManager.applyDamage(target, dragon.damage)
-			damagePlayerRemote:FireAllClients(target.UserId, dragon.damage, pos)
+			-- Sprint 7: Lightning's chain damage uses specialDamage so the
+			-- Special-stat upgrade scales chain hits. Each link does the
+			-- same damage (Storm's special is breadth, not concentrated burst).
+			local killed, _ = CombatManager.applyDamage(target, state.specialDamage)
+			damagePlayerRemote:FireAllClients(target.UserId, state.specialDamage, pos)
 			if killed then
 				RoundManager.recordKill(player, target)
 				DataManager.addCoins(player, 10)
@@ -527,8 +626,9 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 				if hitCount >= 3 then break end
 				hitCount += 1
 				CombatManager.recordDamageDealt(player)
-				NPCManager.applyDamage(npc.id, dragon.damage, player.UserId)
-				damageNPCRemote:FireClient(player, npc.model, dragon.damage)
+				-- Sprint 7: same upgrade-aware specialDamage source for NPC chain hits.
+				NPCManager.applyDamage(npc.id, state.specialDamage, player.UserId)
+				damageNPCRemote:FireClient(player, npc.model, state.specialDamage)
 			end
 		end
 

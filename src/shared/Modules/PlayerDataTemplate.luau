@@ -14,6 +14,23 @@ export type WelcomeBonus = {
 	firstWinAvailable: boolean, -- true if "first win of day" reward not yet claimed
 }
 
+-- Sprint 7: per-dragon stat upgrade levels. Each entry is a count in [0, 5]
+-- of how many times the kid has spent coins to upgrade that stat for that
+-- dragon. The actual gameplay magnitude is computed by DragonProgression
+-- (counts × per-stat magnitude) so we can rebalance numbers without
+-- migrating saved data.
+--
+-- Per-dragon (not shared) by design: gives each dragon a sense of identity
+-- and creates ongoing reasons to use coins beyond unlocking new dragons.
+-- See ROADMAP Sprint 7 — "Mastery" cross-dragon scaling is intentionally
+-- deferred until playtest data shows whether rebuild-pain is real.
+export type DragonUpgradeLevels = {
+	atk: number,
+	def: number,
+	spd: number,
+	special: number,
+}
+
 export type PlayerData = {
 	coins: number,
 	unlockedDragons: { [string]: boolean },
@@ -33,6 +50,14 @@ export type PlayerData = {
 	-- because subsequent GetPlayerData refreshes during the same session will
 	-- still see the value but client tracks "already shown" locally.
 	welcomeBonus: WelcomeBonus?,
+	-- Sprint 7: per-dragon stat upgrade levels. Keys are dragonIds matching
+	-- DragonConfig (Ember/Frost/Storm/Terra/Shadow/Prism). Missing keys are
+	-- treated as all-zeros — no need to pre-populate every dragon at signup.
+	dragonUpgrades: { [string]: DragonUpgradeLevels },
+	-- Sprint 7: first-time tutorial flag. Flipped to true after the kid's
+	-- first ProximityPrompt trigger on the Lair Stat Stone so the 5-sec
+	-- intro hint doesn't replay on subsequent visits.
+	hasSeenLairTutorial: boolean,
 }
 
 local DEFAULT_DATA: PlayerData = {
@@ -45,6 +70,10 @@ local DEFAULT_DATA: PlayerData = {
 	lastWinDay = 0,
 	totalLogins = 0,
 	welcomeBonus = nil,
+	-- Sprint 7: empty upgrade map — DragonProgression treats missing keys as
+	-- all-zeros so we don't need to enumerate every dragon up front.
+	dragonUpgrades = {},
+	hasSeenLairTutorial = false,
 }
 
 -- Deep copy so each player gets their own table
@@ -66,6 +95,8 @@ local function getDefault(): PlayerData
 		lastWinDay = 0,
 		totalLogins = 0,
 		welcomeBonus = nil,
+		dragonUpgrades = {},
+		hasSeenLairTutorial = false,
 	}
 end
 

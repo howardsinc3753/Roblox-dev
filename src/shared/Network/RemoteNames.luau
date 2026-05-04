@@ -14,6 +14,16 @@ return {
 	-- Lock-on telemetry. Client fires when its lock-on target changes (player
 	-- userId, or 0 to clear). Server uses this to warn the locked player.
 	LockOnTarget = "LockOnTarget",
+	-- Sprint 7: client clicks "Upgrade Atk +5 (Cost 100)" → fires this
+	-- with (dragonId, statKey). Server validates coins + level cap +
+	-- per-player race lock, deducts, increments, force-saves, then
+	-- replies via UpdateCoins (existing) + DragonStatsUpdated (below).
+	UpgradeStat = "UpgradeStat",
+	-- Sprint 7: client → server, no payload. Fired the first time the
+	-- kid opens the Stat Stone modal. Server flips
+	-- PlayerData.hasSeenLairTutorial so the welcome hint doesn't replay
+	-- on rejoin. Idempotent: subsequent fires are silent no-ops.
+	MarkLairTutorialSeen = "MarkLairTutorialSeen",
 
 	-- Server → Client (RemoteEvents)
 	DamagePlayer = "DamagePlayer",
@@ -42,6 +52,20 @@ return {
 	-- client so kids see structured wave progress instead of continuous
 	-- chaos. Payload is a Variant table specific to each state.
 	WaveStateChanged = "WaveStateChanged",
+	-- Sprint 7: server → client after a successful UpgradeStat. Carries
+	-- (dragonId, levels, effectiveStats) so the upgrade UI can update
+	-- the panel + HUD level indicator without a GetPlayerData round-trip.
+	-- Also fired on player join (after PlayerData load) so the client's
+	-- caches start populated. Result includes the effective speed so
+	-- FlightController can update its movement cache for the active
+	-- dragon (the speed upgrade isn't visible without this).
+	DragonStatsUpdated = "DragonStatsUpdated",
+	-- Sprint 7: practice-dummy hit feedback. Server fires this to the
+	-- shooter when their breath cone hits a tagged Lair dummy. Client
+	-- renders a floating "-N" damage number above the dummy and plays
+	-- the existing Hit sound. Separate from DamageNPC so the dummy
+	-- isn't accidentally counted as a kill / coin reward.
+	DummyHit = "DummyHit",
 
 	-- Client → Server (RemoteFunctions)
 	GetPlayerData = "GetPlayerData",

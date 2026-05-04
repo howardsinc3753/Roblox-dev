@@ -32,6 +32,10 @@ local function setup()
 		RemoteNames.UseShield,
 		RemoteNames.ShieldActivated,
 		RemoteNames.WaveStateChanged,
+		RemoteNames.UpgradeStat,
+		RemoteNames.DragonStatsUpdated,
+		RemoteNames.DummyHit,
+		RemoteNames.MarkLairTutorialSeen,
 	}
 
 	for _, name in eventNames do

@@ -7,14 +7,22 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
 local ZoneManager = require(script.Parent.ZoneManager)
+local DragonProgression = require(script.Parent.DragonProgression)
 
 local CombatManager = {}
 
--- Runtime state per player
+-- Runtime state per player.
+-- Sprint 7: `damage` and `specialDamage` are the EFFECTIVE values (DragonConfig
+-- base + per-player upgrade bonuses). Read these instead of DragonConfig
+-- directly so the kid's upgrade investments actually flow through to combat.
+-- speed isn't tracked here — it's a client-side concept (FlightController) and
+-- the client gets its updated cache via the DragonStatsUpdated remote.
 export type CombatState = {
 	dragonId: string,
 	health: number,
 	maxHealth: number,
+	damage: number,
+	specialDamage: number,
 	alive: boolean,
 	lastBreathTime: number,
 	lastSpecialTime: number,
@@ -73,10 +81,17 @@ function CombatManager.initPlayer(player: Player, dragonId: string)
 		dragon = DragonConfig.Ember
 	end
 
+	-- Sprint 7: stats now fold in per-player upgrade bonuses. Combat code
+	-- reads state.damage / state.specialDamage everywhere — DragonConfig
+	-- is the immutable base; PlayerData.dragonUpgrades is the delta.
+	local effective = DragonProgression.getEffectiveStats(player, dragonId)
+
 	local state: CombatState = {
 		dragonId = dragonId,
-		health = dragon.health,
-		maxHealth = dragon.health,
+		health = effective.health,
+		maxHealth = effective.health,
+		damage = effective.damage,
+		specialDamage = effective.specialDamage,
 		alive = true,
 		lastBreathTime = 0,
 		lastSpecialTime = 0,
@@ -85,6 +100,36 @@ function CombatManager.initPlayer(player: Player, dragonId: string)
 		shieldActiveUntil = 0,
 	}
 	playerStates[player.UserId] = state
+	syncHealthToHumanoid(player, state)
+end
+
+-- Sprint 7: apply a fresh upgrade to the live combat state without forcing
+-- a respawn. Called from the UpgradeStat remote handler so the kid sees
+-- the buff immediately if they're mid-round (Lair retreat → upgrade →
+-- portal back to Arena with stronger dragon).
+--
+-- Health upgrades extend the cap AND heal the delta (so the upgrade feels
+-- like a buff, not a "max HP rose but current HP didn't"). Damage upgrades
+-- mutate state.damage so the next breath does more. Speed isn't here —
+-- the client (FlightController) handles speed via the DragonStatsUpdated
+-- remote since speed is a client-physics concept.
+function CombatManager.applyLiveStatChange(player: Player)
+	local state = playerStates[player.UserId]
+	if not state or not state.alive then return end
+	local effective = DragonProgression.getEffectiveStats(player, state.dragonId)
+
+	local oldMax = state.maxHealth
+	state.maxHealth = effective.health
+	state.damage = effective.damage
+	state.specialDamage = effective.specialDamage
+
+	-- Heal the delta if maxHealth grew (Def upgrade). If it shrunk for any
+	-- reason (it currently can't, but defensively), clamp current HP down.
+	if effective.health > oldMax then
+		state.health = math.min(state.maxHealth, state.health + (effective.health - oldMax))
+	elseif state.health > state.maxHealth then
+		state.health = state.maxHealth
+	end
 	syncHealthToHumanoid(player, state)
 end
 
@@ -202,15 +247,18 @@ end
 function CombatManager.respawn(player: Player)
 	local state = playerStates[player.UserId]
 	if state then
-		local dragon = DragonConfig[state.dragonId]
-		if dragon then
-			state.health = dragon.health
-			state.maxHealth = dragon.health
-			state.alive = true
-			state.lastDamageTime = 0 -- fresh respawn, regen ready immediately if hurt
-			state.shieldActiveUntil = 0 -- drop any shield carrying over from pre-death
-			syncHealthToHumanoid(player, state)
-		end
+		-- Sprint 7: respawn re-reads effective stats so any upgrades the kid
+		-- bought between death and respawn (e.g., they died, ported to Lair,
+		-- upgraded, are now respawning) are reflected in the new combat state.
+		local effective = DragonProgression.getEffectiveStats(player, state.dragonId)
+		state.health = effective.health
+		state.maxHealth = effective.health
+		state.damage = effective.damage
+		state.specialDamage = effective.specialDamage
+		state.alive = true
+		state.lastDamageTime = 0 -- fresh respawn, regen ready immediately if hurt
+		state.shieldActiveUntil = 0 -- drop any shield carrying over from pre-death
+		syncHealthToHumanoid(player, state)
 	end
 end
 

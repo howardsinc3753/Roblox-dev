@@ -213,12 +213,13 @@ local function handleResting(_waveNum: number, payload: any)
 		setPanelTheme(Color3.fromRGB(255, 220, 100), Color3.fromRGB(255, 250, 200))
 	end
 
-	-- First-time-only tip: nudge the kid to use the Lair during the rest.
-	-- Sprint 7 will add stat upgrades in the Lair so this becomes more
-	-- actionable; for now it's a soft nudge to explore the safe zone.
+	-- First-time-only tip: nudge the kid to use the Lair Stat Stone during
+	-- the rest period. Sprint 7 made the Lair actionable — this tip now
+	-- points them at the upgrade obelisk so the rest beat has a meaningful
+	-- destination, not just a calm-down moment.
 	if not hasShownLairTip then
 		hasShownLairTip = true
-		showSubtitle("💡 Tip: portal to your Lair to catch your breath!", 6)
+		showSubtitle("💡 Tip: portal to your Lair → press E on the Stat Stone to upgrade!", 7)
 	end
 end
 
