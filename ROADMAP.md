@@ -274,6 +274,53 @@ Tier 3 deferred:
 - Dragon idle animations (more wing-flap variation when not moving)
 - Portal arrival flash effect (would need a new remote)
 
+### Sprint 9a — Analytics baseline (~1.5 hours) ✅ shipped
+
+Use case: game is published with kids playing. Sprint 10 (Boss Waves)
+needs a baseline funnel to measure against. Decision: ship analytics
+NOW so by the time Boss Waves launches, we can see "did boss waves
+move retention" with real before/after data — not guess.
+
+Funnel events shipped:
+- `SessionStart` / `SessionEnd` (with sessionLength) / `FirstSession`
+  (only on the kid's first-ever join)
+- `WaveCleared` (waveNumber, isBossWave)
+- `RoundCompleted` (roundNumber, didWin, kills, coinsEarned) +
+  `RoundWon` for the winner specifically
+- `StatUpgraded` (dragonId, statKey, newLevel, coinsCost)
+- `DragonUnlocked` (dragonId, coinsCost, viaShop=false for now)
+
+Sprint 10 placeholders scaffolded (no-op until Boss Waves ship):
+- `BossEncountered` (bossName, roundNum)
+- `BossDefeated` (bossName, roundNum, damageContribution, coinReward)
+- `BossTimedOut` (bossName, roundNum, hpRemainingPercent)
+
+Implementation:
+- `Analytics.luau` server module wraps `AnalyticsService:LogCustomEvent`
+- Per-player session bookkeeping (sessionId + joinTimeOs) injected
+  into every event's customFields so the dashboard can group by session
+- All calls wrapped in pcall so a logging failure can never crash a
+  gameplay path
+- Studio mode mirrors events to Output console instead of dashboard
+  (which is a no-op in Studio anyway) so devs can see the event flow
+- Auto-cleanup via Players.PlayerRemoving so a crashed-out player
+  doesn't leak their session record
+
+### Sprint 10 — Boss Waves: BLAZE THE INFERNO LORD (~10-12 hours) — PLANNED, NOT YET STARTED
+
+Spec locked after peer-Claude audit pass:
+- Single boss for MVP (Frostmaul / Voltrix as Stage 1.5 reskins after
+  data validates the loop)
+- Cadence: every 3rd round = Mega Boss Round (4th wave appended)
+- HP `800 × playerCount`, locked at spawn (no dynamic rescale)
+- Two telegraphed attacks: Inferno Slam (1.8s circle) + Magma Beam (1.5s line)
+- Reward: 50 flat participation + 300 damage-share
+- 30s timeout warning: "BOSS ESCAPING IN 30s — FINISH HIM"; despawn at 0
+  with no rewards (failure → learning loop)
+- Boss music swap on encounter
+- Storm dragon mesh upscaled scale=12 + deep-red tint (no new asset)
+- Persistent `bossesDefeated` stat in PlayerData
+
 ### Sprint 8 — First-time Tutorial (~4-5 hours)
 - Detect first-ever join (`data.totalLogins == 1` — peer Claude already tracks this)
 - Quest-style nudges: "Try breath attack on the dummy" → "Step through the portal"

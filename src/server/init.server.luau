@@ -21,6 +21,7 @@ local RateLimiter = require(script.RateLimiter)
 local LairBuilder = require(script.LairBuilder)
 local ZoneManager = require(script.ZoneManager)
 local DragonProgression = require(script.DragonProgression)
+local Analytics = require(script.Analytics)
 local CollectionService = game:GetService("CollectionService")
 
 -- Disable Roblox's default character auto-spawn. Without this, Roblox
@@ -219,6 +220,15 @@ local function processPlayer(player: Player)
 	-- spawn at the base DragonConfig speed regardless of their +Spd levels
 	-- until the first upgrade or dragon switch fires the remote).
 	fireDragonStatsUpdated(player, dragonId)
+	-- Sprint 9a: kick off the analytics session AFTER PlayerData loaded
+	-- and the standard onboarding (leaderstats, spawn) is in place. That
+	-- way the SessionStart event has the right player state. markFirstSession
+	-- fires only on the kid's actual first-ever join (totalLogins == 1
+	-- means processLogin just incremented from 0 → 1).
+	Analytics.startSession(player)
+	if data.totalLogins == 1 then
+		Analytics.markFirstSession(player)
+	end
 end
 
 Players.PlayerAdded:Connect(processPlayer)
@@ -233,6 +243,11 @@ end
 
 Players.PlayerRemoving:Connect(function(player: Player)
 	print(`[Server] {player.Name} leaving`)
+	-- Sprint 9a: end the analytics session BEFORE we tear down the player's
+	-- state — the SessionEnd event needs the session record alive to compute
+	-- session length. Analytics has its own PlayerRemoving hook as a backstop
+	-- for crashes / forgotten cleanup, but explicit-here is cleaner.
+	Analytics.endSession(player)
 	DataManager.unloadPlayer(player)
 	CombatManager.removePlayer(player)
 	RoundManager.removePlayerScore(player)
@@ -282,6 +297,10 @@ unlockDragonRemote.OnServerEvent:Connect(function(player: Player, dragonId: unkn
 	data.coins -= dragon.cost
 	data.unlockedDragons[id] = true
 	updateCoinsRemote:FireClient(player, data.coins)
+	-- Sprint 9a: log the unlock for the funnel. viaShop=false because
+	-- this is the coin-purchased path; the future Robux "Unlock All
+	-- Dragons" pass will fire the same event with viaShop=true.
+	Analytics.dragonUnlocked(player, id, dragon.cost, false)
 	print(`[Server] {player.Name} unlocked {id}!`)
 end)
 
@@ -363,6 +382,13 @@ upgradeStatRemote.OnServerEvent:Connect(function(player: Player, dragonIdRaw: un
 	if activeState and activeState.dragonId == dragonId then
 		CombatManager.applyLiveStatChange(player)
 	end
+
+	-- Sprint 9a: log the upgrade event for the funnel. coinsCost computed
+	-- from the upgrade cost curve — newLevel is the level we just bought,
+	-- so the cost is the (newLevel)th entry in the curve.
+	local costCurve = DragonProgression.COST_BY_LEVEL
+	local coinsCost = costCurve and costCurve[newLevel] or 0
+	Analytics.statUpgraded(player, dragonId, statKey, newLevel or 0, coinsCost)
 
 	print(`[Server] {player.Name} upgraded {dragonId}/{statKey} to lv{newLevel}; coins now {newCoins}`)
 end)
@@ -798,6 +824,15 @@ local function awardWaveCleared(waveNum: number, coinReward: number)
 		RoundManager.recordCoins(player, coinReward) -- counts toward end-of-round summary
 		updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
 		refreshLeaderstats(player)
+		-- Sprint 9a: log per-player wave-cleared event. clearTimeSec is
+		-- left as 0 here because the wave-clear callback doesn't carry
+		-- that data — the wave's clear time lives in the WaveResult that
+		-- runWaveSequence returns. Acceptable for MVP since the funnel
+		-- only needs the event count + waveNumber dimension.
+		-- isBossWave: wave 3 is the existing boss wave per Sprint 6;
+		-- Sprint 10 mega-bosses get logged via Analytics.bossDefeated
+		-- separately, NOT through this path.
+		Analytics.waveCleared(player, waveNum, 0, waveNum == 3)
 	end
 	print(`[Server] Wave {waveNum} cleared, awarded {coinReward} coins to participants`)
 end
@@ -896,6 +931,26 @@ RoundManager.setCallbacks(
 			coinsEarnedThisRound[player.UserId] = earned
 			updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
 			refreshLeaderstats(player)
+		end
+
+		-- Sprint 9a: log RoundCompleted for every player in the server,
+		-- with didWin flag set for the winner only. This is what powers
+		-- the "round participation rate" funnel metric. Iterates again
+		-- because the loop above was about coin payout — keeping concerns
+		-- separate so a future analytics tweak doesn't subtly change
+		-- payout math.
+		local roundState = RoundManager.getState()
+		for _, player in Players:GetPlayers() do
+			local didWin = winner ~= nil and winner.UserId == player.UserId
+			local kills = 0
+			for _, entry in scoreboard do
+				if entry.userId == player.UserId then
+					kills = entry.kills
+					break
+				end
+			end
+			local coinsEarned = coinsEarnedThisRound[player.UserId] or 0
+			Analytics.roundCompleted(player, roundState.roundNumber, didWin, kills, coinsEarned)
 		end
 
 		roundEndRemote:FireAllClients(

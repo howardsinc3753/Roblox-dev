@@ -51,6 +51,7 @@ init.server.luau  (entry — RUNS FIRST, errors here = total breakage)
 ├── LairBuilder.luau          ← Crystal Lair (Sprint 5)
 ├── ZoneManager.luau          ← Sprint 5 Part C: Lair sphere test + Player.Zone attribute
 ├── DragonProgression.luau    ← Sprint 7: per-dragon stat upgrades, cost curve, atomic tryUpgrade
+├── Analytics.luau            ← Sprint 9a: AnalyticsService wrapper, session bookkeeping, funnel events
 ├── NPCManager.luau           ← AI dragons + Sprint 6 wave state machine (runWaveSequence)
 │   └── EnemyConfig (shared)
 └── RateLimiter.luau          ← per-player remote spam prevention
