@@ -620,6 +620,23 @@ function DragonUpgradeUI.updateCoins(coins: number)
 end
 
 function DragonUpgradeUI.updateStats(dragonId: string, levels: any, effective: any)
+	-- Detect a level-up since the last cached state. If any stat went UP,
+	-- the kid just made a successful purchase — play the dedicated
+	-- Purchase chime so they hear the spend (the existing per-coin "Coin"
+	-- ding plays on every UpdateCoins so it doesn't read as ceremony).
+	-- Skipped on the FIRST update for a dragon (no previous state to
+	-- compare against) so the initial DragonStatsUpdated fired by
+	-- processPlayer / SelectDragon doesn't false-trigger the chime.
+	local previous = statsCache[dragonId]
+	if previous and previous.levels and levels then
+		local prev = previous.levels
+		if (levels.atk or 0) > (prev.atk or 0)
+			or (levels.def or 0) > (prev.def or 0)
+			or (levels.spd or 0) > (prev.spd or 0)
+			or (levels.special or 0) > (prev.special or 0) then
+			SoundManager.play("Purchase")
+		end
+	end
 	statsCache[dragonId] = { levels = levels, effective = effective }
 	if screenGui and screenGui.Enabled and activeTab == dragonId then rebuild() end
 end

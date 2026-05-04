@@ -529,24 +529,38 @@ local function buildInteractionStones(parent: Instance)
 	sl.TextScaled = true
 	sl.Parent = statLabel
 
-	-- Sprint 7: tag + ProximityPrompt. Tag lets the client locate this
-	-- specific obelisk via CollectionService. ProximityPrompt fires
-	-- Triggered on both server AND client when the kid presses E within
-	-- range; the client opens DragonUpgradeUI on its side. Range 6 is
-	-- intentionally tighter than Roblox's default 10 so the kid has to
-	-- WALK UP to the stone — generous enough to feel forgiving but not
-	-- so generous they accidentally trigger from across the lair (peer
-	-- audit #13). RequiresLineOfSight prevents through-wall triggers.
-	CollectionService:AddTag(statStone, STAT_STONE_TAG)
+	-- Sprint 7: tag + ProximityPrompt. POST-PLAYTEST FIX: parenting the
+	-- prompt to `statStone` was unreliable. When the hero asset loads,
+	-- `statStone` is whatever the first BasePart descendant happens to
+	-- be — could be a tiny detail piece embedded deep in the obelisk
+	-- mesh with a Position offset that doesn't match the obelisk's
+	-- visible center. Plus RequiresLineOfSight=true could be blocked by
+	-- the obelisk's own body geometry, so the kid walking up to the
+	-- visible obelisk would never see the prompt fire.
+	--
+	-- Fix: create a dedicated invisible 8x14x8 interaction anchor at the
+	-- KNOWN obelisk position, parent the prompt to it, tag it. The anchor
+	-- is reliably positioned, large enough that ProximityPrompt's range
+	-- check works from any angle, and decoupled from the hero asset's
+	-- internal structure. RequiresLineOfSight = false because the anchor
+	-- is invisible and we don't want the visible obelisk to occlude it.
+	-- Range 8 (slightly larger than 6) compensates for the anchor size.
+	local interactionAnchor = makePart("StatStoneInteraction", parent, {
+		Size = Vector3.new(8, 14, 8),
+		CFrame = CFrame.new(statPos + Vector3.new(0, 7, 0)),
+		Transparency = 1,
+		CanCollide = false, -- kid can walk through (and they need to to read the prompt)
+	})
+	CollectionService:AddTag(interactionAnchor, STAT_STONE_TAG)
 	local prompt = Instance.new("ProximityPrompt")
 	prompt.Name = "StatStonePrompt"
 	prompt.ActionText = "Upgrade Dragon"
 	prompt.ObjectText = "Stat Stone"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.MaxActivationDistance = 6
-	prompt.RequiresLineOfSight = true
+	prompt.MaxActivationDistance = 8
+	prompt.RequiresLineOfSight = false
 	prompt.HoldDuration = 0
-	prompt.Parent = statStone
+	prompt.Parent = interactionAnchor
 
 	-- Shop Stone (right of pillar) — same obelisk asset, mirror position
 	local shopPos = LAIR_CENTER + Vector3.new(50, FLOOR_THICKNESS / 2, 0)

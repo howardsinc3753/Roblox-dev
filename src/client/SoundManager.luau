@@ -18,6 +18,14 @@ local SOUNDS: { [string]: { id: string, volume: number, pitch: number } } = {
 	RoundEnd = { id = "rbxassetid://9066114566", volume = 1.5, pitch = 0.7 }, -- 8bit explosion (SFX) low pitch
 	Coin = { id = "rbxassetid://9114444008", volume = 0.8, pitch = 2.5 }, -- Fire Whoosh pitched up as ding
 	WingFlap = { id = "rbxassetid://9113081793", volume = 0.5, pitch = 0.4 }, -- Airy Whoosh low pitch as flap
+	-- Sprint 7: deliberate-purchase chime. The existing "Coin" sound fires
+	-- on every UpdateCoins event (kill rewards, wave bonuses, daily login,
+	-- etc.) so it's noisy and doesn't read as a "you spent something" beat.
+	-- Purchase is louder + lower-pitched than Coin to feel weightier — a
+	-- "ka-ching" celebration the kid hears the moment they commit. Played
+	-- by DragonUpgradeUI on successful upgrade and DragonSelectUI on
+	-- dragon unlock click.
+	Purchase = { id = "rbxassetid://9066114566", volume = 1.8, pitch = 1.3 }, -- 8bit explosion at celebratory pitch
 }
 
 local soundInstances: { [string]: Sound } = {}

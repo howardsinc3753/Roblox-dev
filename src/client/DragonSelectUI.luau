@@ -13,6 +13,9 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+-- Sprint 7: Purchase sound on dragon-unlock click (kid playtest reported
+-- the existing per-coin "Coin" ding didn't feel like a deliberate buy).
+local SoundManager = require(script.Parent.SoundManager)
 
 local DragonSelectUI = {}
 
@@ -184,6 +187,13 @@ local function buildCard(dragonId: string, parent: Frame): { card: Frame, status
 				if unlockDragonRemote then
 					unlockDragonRemote:FireServer(dragonId)
 				end
+				-- Sprint 7: ka-ching on the buy click. The per-coin "Coin"
+				-- sound fires on every UpdateCoins event so it doesn't
+				-- read as a deliberate-purchase beat — the louder Purchase
+				-- chime makes the spend feel ceremonial. Played
+				-- optimistically (before server validates) but the funds
+				-- check above means we only play on a likely-successful click.
+				SoundManager.play("Purchase")
 				-- Optimistic UI: show as unlocked immediately. If server rejects,
 				-- the next data refresh will undo it.
 				cachedUnlocks[dragonId] = true
@@ -415,6 +425,9 @@ local function confirmCursorSelection()
 	else
 		if cachedCoins >= dragon.cost then
 			if unlockDragonRemote then unlockDragonRemote:FireServer(dragonId) end
+			-- Mirror the click-handler ka-ching for the gamepad/keyboard
+			-- path so the buy moment feels the same regardless of input.
+			SoundManager.play("Purchase")
 			cachedUnlocks[dragonId] = true
 			cachedCoins -= dragon.cost
 			refreshAllCards()

@@ -293,31 +293,47 @@ end)
 upgradeStatRemote.OnServerEvent:Connect(function(player: Player, dragonIdRaw: unknown, statKeyRaw: unknown)
 	-- 3/sec is plenty — the audit flagged a kid double-clicking the +Atk
 	-- button as the realistic abuse vector, not a sustained spam.
-	if not RateLimiter.check(player, "UpgradeStat", 3) then return end
+	if not RateLimiter.check(player, "UpgradeStat", 3) then
+		print(`[UpgradeStat] reject userId={player.UserId}: rate-limited`)
+		return
+	end
 	-- POST-AUDIT FIX: enforce design intent that upgrades only happen at the
 	-- Lair Stat Stone. The modal is only opened via the Lair ProximityPrompt,
 	-- but a malicious client could call this remote directly mid-Arena —
 	-- this gate locks the upgrade flow to the safe zone where it belongs.
 	-- Not a security issue (it's the player's own coins), just a design gate.
-	if not ZoneManager.isPlayerInLair(player) then return end
-	if typeof(dragonIdRaw) ~= "string" then return end
-	if typeof(statKeyRaw) ~= "string" then return end
+	if not ZoneManager.isPlayerInLair(player) then
+		print(`[UpgradeStat] reject userId={player.UserId}: not in Lair`)
+		return
+	end
+	if typeof(dragonIdRaw) ~= "string" then
+		print(`[UpgradeStat] reject userId={player.UserId}: bad dragonId type {typeof(dragonIdRaw)}`)
+		return
+	end
+	if typeof(statKeyRaw) ~= "string" then
+		print(`[UpgradeStat] reject userId={player.UserId}: bad statKey type {typeof(statKeyRaw)}`)
+		return
+	end
 	local dragonId = dragonIdRaw :: string
 	local statKey = statKeyRaw :: string
 
-	-- Ownership: can't upgrade a dragon you don't own. Silent reject so a
-	-- compromised client can't probe which dragons exist.
+	-- Ownership: can't upgrade a dragon you don't own.
 	local data = DataManager.getData(player)
-	if not data or not data.unlockedDragons[dragonId] then return end
+	if not data then
+		print(`[UpgradeStat] reject userId={player.UserId}: no PlayerData (ghost player?)`)
+		return
+	end
+	if not data.unlockedDragons[dragonId] then
+		print(`[UpgradeStat] reject userId={player.UserId}: dragon {dragonId} not unlocked`)
+		return
+	end
 
 	local success, newLevel, newCoins, errReason = DragonProgression.tryUpgrade(player, dragonId, statKey)
 	if not success then
-		-- Silent fail for MVP. The client may have raced with another upgrade
-		-- attempt or with a coin deduction from elsewhere; the upcoming
-		-- DragonStatsUpdated push (or the kid's next interaction) will
-		-- reconcile the UI. errReason is captured for future logging /
-		-- client-side error toasts if QA reveals confused players.
-		_ = errReason
+		-- Logged so QA can diagnose from Output console. errReason is one of:
+		-- in_flight, no_data, unknown_dragon, unknown_stat, max_level,
+		-- not_enough_coins, save_failed.
+		print(`[UpgradeStat] reject userId={player.UserId} dragon={dragonId} stat={statKey}: {errReason}`)
 		return
 	end
 

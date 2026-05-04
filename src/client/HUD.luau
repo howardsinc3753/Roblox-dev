@@ -251,26 +251,32 @@ function HUD.create()
 	-- dragon). Tucks into the same top-left card next to the dragon name
 	-- so the kid's progression is constantly visible during gameplay —
 	-- without this, a kid who spent 800 coins on Atk Lv 5 has no in-combat
-	-- visual cue that they're stronger (peer audit #2). Hidden until
-	-- HUD.setDragonLevel is called with a non-zero level so a fresh
-	-- account doesn't display "Lv 0".
+	-- visual cue that they're stronger (peer audit #2).
+	--
+	-- POST-PLAYTEST FIX: badge stays visible even at Lv 0 (subdued grey)
+	-- so kids can SEE the progression slot exists before they buy. Hiding
+	-- it at Lv 0 (initial implementation) made first-time kids ask "where
+	-- are the badges?" because the system was invisible until they
+	-- interacted with it. The slot now reads "Lv 0" → "Lv 1" → ... so the
+	-- placeholder is its own affordance.
 	dragonLevelLabel = Instance.new("TextLabel")
 	dragonLevelLabel.Name = "DragonLevel"
 	dragonLevelLabel.Size = UDim2.fromOffset(70, 28)
 	dragonLevelLabel.Position = UDim2.new(0, 264, 0, 16)
-	dragonLevelLabel.BackgroundColor3 = Color3.fromRGB(80, 60, 30)
-	dragonLevelLabel.BackgroundTransparency = 0.15
-	dragonLevelLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	dragonLevelLabel.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+	dragonLevelLabel.BackgroundTransparency = 0.3
+	dragonLevelLabel.TextColor3 = Color3.fromRGB(170, 170, 180)
 	dragonLevelLabel.Text = "Lv 0"
 	dragonLevelLabel.Font = Enum.Font.GothamBlack
 	dragonLevelLabel.TextSize = 16
-	dragonLevelLabel.Visible = false
+	dragonLevelLabel.Visible = true
 	dragonLevelLabel.Parent = screenGui
 	local levelCorner = Instance.new("UICorner")
 	levelCorner.CornerRadius = UDim.new(0, 6)
 	levelCorner.Parent = dragonLevelLabel
 	local levelStroke = Instance.new("UIStroke")
-	levelStroke.Color = Color3.fromRGB(255, 215, 0)
+	levelStroke.Name = "LevelStroke"
+	levelStroke.Color = Color3.fromRGB(110, 110, 120)
 	levelStroke.Thickness = 1
 	levelStroke.Transparency = 0.4
 	levelStroke.Parent = dragonLevelLabel
@@ -622,12 +628,18 @@ function HUD.setDragon(dragonId: string)
 		dragonNameLabel.Text = `{dragon.name} ({dragon.element})`
 		dragonNameLabel.TextColor3 = dragon.color
 	end
-	-- Sprint 7: dragon switched, reset the level badge to hidden until the
-	-- next DragonStatsUpdated for this dragon arrives. Without this, the
-	-- old dragon's level lingers on the new dragon's name. The server fires
-	-- DragonStatsUpdated immediately after SpawnDragon so the gap is brief.
+	-- Sprint 7: dragon switched, reset the level badge to subdued "Lv 0"
+	-- until the next DragonStatsUpdated for this dragon arrives. Without
+	-- this, the old dragon's level lingers on the new dragon's name. The
+	-- server fires DragonStatsUpdated immediately after SpawnDragon so
+	-- the gap is brief. Stays visible (not hidden) so the slot's affordance
+	-- is preserved across switches.
 	if dragonLevelLabel then
-		dragonLevelLabel.Visible = false
+		dragonLevelLabel.Text = "Lv 0"
+		dragonLevelLabel.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+		dragonLevelLabel.TextColor3 = Color3.fromRGB(170, 170, 180)
+		local stroke = dragonLevelLabel:FindFirstChild("LevelStroke") :: UIStroke?
+		if stroke then stroke.Color = Color3.fromRGB(110, 110, 120) end
 	end
 	if specialNameLabel then
 		specialNameLabel.Text = string.upper(dragon.specialName)
@@ -645,16 +657,25 @@ end
 -- Sprint 7: set the active dragon's total upgrade level (sum of atk + def
 -- + spd + special levels, range 0-20). Called from init.client.luau when
 -- DragonStatsUpdated arrives for the player's currently-selected dragon.
--- Hides the badge at level 0 so a fresh-account kid doesn't see "Lv 0"
--- (which reads as "you have nothing yet" — discouraging).
+-- Always visible — at Lv 0 the badge is subdued grey ("placeholder slot");
+-- at Lv 1+ it lights up gold so the upgrade is unmissable. POST-PLAYTEST:
+-- hiding at Lv 0 caused kids to miss the system entirely.
 function HUD.setDragonLevel(totalLevel: number)
 	if not dragonLevelLabel then return end
-	if totalLevel <= 0 then
-		dragonLevelLabel.Visible = false
-		return
-	end
 	dragonLevelLabel.Visible = true
 	dragonLevelLabel.Text = `Lv {totalLevel}`
+	local stroke = dragonLevelLabel:FindFirstChild("LevelStroke") :: UIStroke?
+	if totalLevel <= 0 then
+		dragonLevelLabel.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+		dragonLevelLabel.TextColor3 = Color3.fromRGB(170, 170, 180)
+		if stroke then stroke.Color = Color3.fromRGB(110, 110, 120) end
+	else
+		-- Gold theme matches the Stat Stone modal's accent. Ramps the
+		-- visual signal from "you have a slot here" to "you've invested".
+		dragonLevelLabel.BackgroundColor3 = Color3.fromRGB(80, 60, 30)
+		dragonLevelLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+		if stroke then stroke.Color = Color3.fromRGB(255, 215, 0) end
+	end
 end
 
 -- Animation phase for the "ready" pulse. tick()-based so it's frame-rate
