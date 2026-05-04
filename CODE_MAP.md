@@ -184,3 +184,30 @@ After the Sprint 5 Part A breakage:
 2. **Test require in isolation** before integrating. Studio command bar can do this: `require(game.ServerScriptService.Server.LairBuilder)` and check for errors.
 3. **Smaller integration steps**. Don't add a new module + a new server-init call + 200 lines of code in one commit. Add the file alone, verify it loads, then wire in.
 4. **Read this code map** before touching anything in init.server.luau or init.client.luau — those two files are the most fragile.
+
+### Recurring footgun: paren-prefix ambiguous syntax
+
+This bug class has now bitten us twice (HUD.luau Sprint 5, DragonProgression.luau
+Sprint 7). Luau's parser reads a line starting with `(` as a function-call
+argument list applied to the previous expression's result.
+
+```lua
+-- BROKEN: Luau parses this as `cost(levels :: any)[statKey] = current + 1`
+data.coins -= cost
+(levels :: any)[statKey] = current + 1
+
+-- FIXED: bind the cast to a concrete local so the next line starts with a name
+local levelsAny = levels :: any
+data.coins -= cost
+levelsAny[statKey] = current + 1
+```
+
+Also bites with `Instance.new(...)` followed by a `(cast):Property = ...` line.
+Whenever you write a line that starts with `(`, either:
+- Hoist the parenthesized expression to a local first, OR
+- Add an explicit `;` at the end of the previous line, OR
+- Reorder so the line doesn't start with `(`.
+
+Before committing any module that uses `(x :: SomeType)` or `(Instance.new("X"))`
+on its own line, grep for `^\s*\(` in the new code and verify each isn't
+preceded by an expression-returning statement.
