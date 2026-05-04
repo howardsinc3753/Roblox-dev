@@ -36,6 +36,7 @@ local specialEffectLabel: TextLabel -- e.g. "DMG: 30" or "HEAL +40"
 local specialReadyStroke: UIStroke -- pulsing glow border when ready
 local dragonNameLabel: TextLabel
 local dragonLevelLabel: TextLabel
+local bossCountdownLabel: TextLabel
 -- Button-prompt labels in the cooldown panels. Module-level so the live
 -- LastInputTypeChanged hook can swap them between KB+M ("LMB"/"E") and
 -- gamepad ("RT"/"LT") and touch ("TAP") as the player switches devices.
@@ -233,6 +234,28 @@ function HUD.create()
 	local timerCorner = Instance.new("UICorner")
 	timerCorner.CornerRadius = UDim.new(0, 8)
 	timerCorner.Parent = roundTimerLabel
+
+	-- === BOSS COUNTDOWN METER (top center, under round timer) ===
+	-- Sprint 10 retention polish: persistent "⚔️ Boss in N rounds" label
+	-- so kids passively learn the cadence and have something to play
+	-- toward. Tucks under the round timer in the same column. Subdued
+	-- grey when far away, gold-pulse when "BOSS ROUND!" Defaults hidden
+	-- until the first RoundStart fires with a valid roundsUntilBoss.
+	bossCountdownLabel = Instance.new("TextLabel")
+	bossCountdownLabel.Name = "BossCountdown"
+	bossCountdownLabel.Size = UDim2.fromOffset(220, 22)
+	bossCountdownLabel.Position = UDim2.new(0.5, -110, 0, 64)
+	bossCountdownLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+	bossCountdownLabel.BackgroundTransparency = 0.3
+	bossCountdownLabel.TextColor3 = Color3.fromRGB(180, 180, 195)
+	bossCountdownLabel.Text = "⚔️ Boss in 3 rounds"
+	bossCountdownLabel.Font = Enum.Font.GothamBold
+	bossCountdownLabel.TextSize = 14
+	bossCountdownLabel.Visible = false
+	bossCountdownLabel.Parent = screenGui
+	local bossCountdownCorner = Instance.new("UICorner")
+	bossCountdownCorner.CornerRadius = UDim.new(0, 6)
+	bossCountdownCorner.Parent = bossCountdownLabel
 
 	-- === DRAGON NAME (top left) ===
 	dragonNameLabel = Instance.new("TextLabel")
@@ -651,6 +674,38 @@ function HUD.setDragon(dragonId: string)
 	-- reminder of which dragon you're flying).
 	if specialCooldownFrame then
 		specialCooldownFrame.BackgroundColor3 = dragon.secondaryColor
+	end
+end
+
+-- Sprint 10: persistent boss countdown meter under the round timer.
+-- Called from init.client.luau when RoundStart fires with the
+-- roundsUntilBoss value. 0 = this round IS the boss round (gold pulse
+-- "⚔️ BOSS ROUND!"); 1-2 = upcoming (grey "Boss in N rounds").
+-- Hidden if roundsUntilBoss is nil (e.g., pre-Sprint-10 server payload
+-- shape, or before the first RoundStart of the session lands).
+function HUD.setBossCountdown(roundsUntilBoss: number?)
+	if not bossCountdownLabel then return end
+	if roundsUntilBoss == nil then
+		bossCountdownLabel.Visible = false
+		return
+	end
+	bossCountdownLabel.Visible = true
+	if roundsUntilBoss <= 0 then
+		-- Either current round IS boss round (0) or we're inside the
+		-- boss wave already. Mid-round joiners hit this case too —
+		-- their first RoundStart fired with 0 because the cadence math
+		-- says boss already. Banner becomes "JUMP IN" for that case.
+		bossCountdownLabel.Text = "⚔️ BOSS ROUND!"
+		bossCountdownLabel.BackgroundColor3 = Color3.fromRGB(80, 30, 20)
+		bossCountdownLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
+	elseif roundsUntilBoss == 1 then
+		bossCountdownLabel.Text = "⚔️ Boss next round!"
+		bossCountdownLabel.BackgroundColor3 = Color3.fromRGB(60, 30, 30)
+		bossCountdownLabel.TextColor3 = Color3.fromRGB(255, 180, 100)
+	else
+		bossCountdownLabel.Text = `⚔️ Boss in {roundsUntilBoss} rounds`
+		bossCountdownLabel.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+		bossCountdownLabel.TextColor3 = Color3.fromRGB(180, 180, 195)
 	end
 end
 

@@ -108,6 +108,7 @@ local upgradeStatRemote = getRemote("UpgradeStat")
 local dragonStatsUpdatedRemote = getRemote("DragonStatsUpdated")
 local dummyHitRemote = getRemote("DummyHit")
 local markLairTutorialSeenRemote = getRemote("MarkLairTutorialSeen")
+local markBossTutorialSeenRemote = getRemote("MarkBossTutorialSeen")
 local bossTelegraphRemote = getRemote("BossTelegraph")
 local bossMusicStateRemote = getRemote("BossMusicState")
 local bossBannerStateRemote = getRemote("BossBannerState")
@@ -406,6 +407,18 @@ markLairTutorialSeenRemote.OnServerEvent:Connect(function(player: Player)
 	if not data then return end
 	if data.hasSeenLairTutorial then return end -- already flipped, no-op
 	data.hasSeenLairTutorial = true
+	DataManager.savePlayer(player)
+end)
+
+-- Sprint 10: same pattern for the boss-context tutorial toast.
+-- Idempotent + force-save so a kid who quits right after seeing it
+-- doesn't see it again on rejoin.
+markBossTutorialSeenRemote.OnServerEvent:Connect(function(player: Player)
+	if not RateLimiter.check(player, "MarkBossTutorialSeen", 2) then return end
+	local data = DataManager.getData(player)
+	if not data then return end
+	if data.hasSeenBossTutorial then return end
+	data.hasSeenBossTutorial = true
 	DataManager.savePlayer(player)
 end)
 
@@ -897,7 +910,16 @@ RoundManager.setCallbacks(
 		-- HUD timer still ticks down to something. The actual round length
 		-- is now wave-driven and shorter — this just provides a worst-case
 		-- bound for the HUD display.
-		roundStartRemote:FireAllClients(roundState.roundNumber, 240)
+		--
+		-- Sprint 10 retention polish: also send roundsUntilBoss so the
+		-- client persistent meter ("⚔️ Boss in N rounds") and the
+		-- first-time tutorial toast can read accurate countdown data
+		-- without hardcoding the cadence client-side. 0 = this is a
+		-- boss round; 1-2 = N rounds away. NPCManager.MEGA_BOSS_CADENCE
+		-- exposed publicly for this read.
+		local cadence = 3 -- mirrors NPCManager.MEGA_BOSS_CADENCE
+		local roundsUntilBoss = (cadence - (roundState.roundNumber % cadence)) % cadence
+		roundStartRemote:FireAllClients(roundState.roundNumber, 240, roundsUntilBoss)
 		-- Reset per-round wave breakdown so onRoundEnd doesn't show stale data.
 		lastRoundWaveResults = {}
 
@@ -1018,6 +1040,60 @@ RoundManager.setCallbacks(
 			firstWinClaimed,
 			lastRoundWaveResults -- Sprint 6: per-wave breakdown for the recap row
 		)
+
+		-- Sprint 10 retention polish: PREVIEW + CLOSER banner fires.
+		-- Goal: kid never reaches an intermission without knowing what's
+		-- next (preview) or how the just-finished boss went (closer).
+		--
+		-- PREVIEW fires after non-boss rounds when the NEXT round is a
+		-- boss round. Banner sits over the DragonSelectUI during the
+		-- 15-second intermission so the kid reads "BLAZE NEXT — pick
+		-- strongest dragon" while choosing.
+		--
+		-- CLOSER fires after a boss round. Different copy depending on
+		-- how the encounter went (peer audit guidance — "next boss in 3,
+		-- keep grinding" feels great after defeat but rubs salt in the
+		-- wound after timeout). ABORTED skips the closer entirely
+		-- because the round was forced to end and the kid already saw
+		-- "Round Over."
+		local cadence = 3 -- mirrors NPCManager.MEGA_BOSS_CADENCE
+		local nextRoundNumber = roundState.roundNumber + 1
+		local isNextBoss = nextRoundNumber % cadence == 0
+
+		-- Detect what the just-finished round looked like for closer copy.
+		local bossOutcome: string? = nil
+		for _, r in lastRoundWaveResults do
+			if r.isBossWave and r.waveNum > 3 then -- waveNum > 3 = the Mega Boss wave (not the standard wave-3 NPC)
+				bossOutcome = r.status -- "CLEARED" / "TIMEOUT" / "ABORTED"
+				break
+			end
+		end
+
+		if bossOutcome == "CLEARED" then
+			bossBannerStateRemote:FireAllClients("CLOSER", {
+				outcome = "CLEARED",
+				roundsUntilNext = cadence, -- always cadence rounds after a boss
+			})
+		elseif bossOutcome == "TIMEOUT" then
+			bossBannerStateRemote:FireAllClients("CLOSER", {
+				outcome = "TIMEOUT",
+				roundsUntilNext = cadence,
+			})
+		end
+		-- ABORTED intentionally skipped — no closer banner.
+
+		-- PREVIEW: fire if next round will spawn the boss. Only fires
+		-- AFTER the closer (if any) since closer is for "what just
+		-- happened" and preview is for "what's coming." If the round
+		-- that just ended was itself a boss round, isNextBoss will be
+		-- false (boss rounds 3, 6, 9 → next is 4, 7, 10) so the two
+		-- banners can never both fire from the same round-end.
+		if isNextBoss then
+			bossBannerStateRemote:FireAllClients("PREVIEW", {
+				bossType = "Blaze",
+				nextRoundNumber = nextRoundNumber,
+			})
+		end
 	end
 )
 

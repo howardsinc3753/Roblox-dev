@@ -327,6 +327,63 @@ local function handleBossTimeout(payload: any)
 	showSubtitle("Try again next time! Press harder, kids.", 5)
 end
 
+-- Sprint 10 retention polish: hype banner during the intermission
+-- BEFORE a boss round. Sits over DragonSelectUI (different ScreenGui
+-- DisplayOrder so it layers naturally) — the kid reads "BLAZE NEXT —
+-- pick your strongest dragon!" while picking. Synergy: action and hype
+-- reinforce instead of competing for attention.
+local function handleBossPreview(payload: any)
+	if not screenGui or not mainBanner then return end
+	screenGui.Enabled = true
+	local bossType = (payload and payload.bossType) or "Blaze"
+	mainBanner.Text = `⚔️  NEXT ROUND: {getBossDisplayName(bossType)}  ⚔️`
+	setPanelTheme(Color3.fromRGB(255, 80, 50), Color3.fromRGB(255, 230, 200))
+	showSubtitle("Choose your strongest dragon!", 7)
+	-- Audio sting — peer audit guidance: kids' eyes are often on the
+	-- dragon, not the HUD. Audio cuts through. Reuse the existing
+	-- RoundStart fanfare (8-bit explosion at high pitch).
+	SoundManager.play("RoundStart")
+end
+
+-- Sprint 10 retention polish: post-boss closer banner. Outcome-aware
+-- copy per peer audit guidance — "next boss in 3 rounds, keep
+-- grinding" lands great after a defeat but rubs salt in the wound
+-- after a timeout. ABORTED skips entirely (server doesn't fire it).
+local function handleBossCloser(payload: any)
+	if not screenGui or not mainBanner then return end
+	screenGui.Enabled = true
+	local outcome = (payload and payload.outcome) or "CLEARED"
+	local roundsUntilNext = (payload and payload.roundsUntilNext) or 3
+	if outcome == "CLEARED" then
+		mainBanner.Text = `✨  Next boss in {roundsUntilNext} rounds — keep grinding!`
+		setPanelTheme(Color3.fromRGB(80, 200, 80), Color3.fromRGB(255, 255, 220))
+	else -- TIMEOUT
+		mainBanner.Text = `Better luck next time — Blaze returns in {roundsUntilNext} rounds.`
+		setPanelTheme(Color3.fromRGB(120, 120, 130), Color3.fromRGB(220, 220, 220))
+	end
+end
+
+-- Sprint 10 retention polish: first-time-only tutorial toast. New kids
+-- (totalLogins == 1, hasSeenBossTutorial == false) see this on their
+-- first round 1 spawn so they understand WHY the persistent meter
+-- matters. Without context, "⚔️ Boss in 2 rounds" is just noise to a
+-- brand-new kid. Auto-dismisses after 8 seconds. The flag flip
+-- (server-side via MarkBossTutorialSeen) survives rejoin.
+local hasShownBossTutorial = false -- session-local dedupe
+local function handleBossTutorialToast()
+	if hasShownBossTutorial then return end
+	hasShownBossTutorial = true
+	if not screenGui or not mainBanner then return end
+	-- Use the subtitle slot for the toast — a longer message that
+	-- doesn't compete with the regular wave pill above. 8 seconds
+	-- is enough to read without forcing the kid to wait.
+	showSubtitle("🐲 Bosses drop the biggest coin rewards — power up your dragon to be ready!", 8)
+end
+
+function WaveTracker.showBossTutorial()
+	handleBossTutorialToast()
+end
+
 function WaveTracker.init()
 	ensureGui()
 
@@ -371,6 +428,13 @@ function WaveTracker.init()
 				handleBossDefeated(payload)
 			elseif bossState == "TIMEOUT" then
 				handleBossTimeout(payload)
+			elseif bossState == "PREVIEW" then
+				-- Sprint 10: pre-boss intermission hype banner.
+				handleBossPreview(payload)
+			elseif bossState == "CLOSER" then
+				-- Sprint 10: post-boss "next boss in N rounds" with
+				-- outcome-aware copy.
+				handleBossCloser(payload)
 			end
 		end)
 	end

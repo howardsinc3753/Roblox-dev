@@ -24,6 +24,11 @@ return {
 	-- PlayerData.hasSeenLairTutorial so the welcome hint doesn't replay
 	-- on rejoin. Idempotent: subsequent fires are silent no-ops.
 	MarkLairTutorialSeen = "MarkLairTutorialSeen",
+	-- Sprint 10: same idempotent-flag-flip pattern for the boss-context
+	-- tutorial toast. Client fires the first time it shows the "Bosses
+	-- drop the biggest coin rewards" toast so the kid never sees it
+	-- twice. Server flips PlayerData.hasSeenBossTutorial + force-saves.
+	MarkBossTutorialSeen = "MarkBossTutorialSeen",
 	-- Sprint 10: Mega Boss attack telegraph. Server fires when Blaze
 	-- starts winding up an attack so the client can render a ground
 	-- marker (red circle for Inferno Slam, red line preview for Magma

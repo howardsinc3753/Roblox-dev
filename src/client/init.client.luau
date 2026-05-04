@@ -113,6 +113,12 @@ task.spawn(function()
 		end
 		-- HUD streak indicator updates every time data refreshes (cheap).
 		HUD.setStreak(data.loginStreak or 0)
+		-- Sprint 10: cache the boss-tutorial flag so the first RoundStart
+		-- handler knows whether to fire the "🐲 Bosses drop the biggest
+		-- coin rewards" toast. Server already filtered by totalLogins
+		-- elsewhere — this flag specifically tracks whether the kid has
+		-- seen THIS particular toast (separate from the Lair tutorial).
+		shouldShowBossTutorial = not data.hasSeenBossTutorial
 	else
 		-- Single-shot fetch: if it fails, the welcome banner + streak badge
 		-- silently never render this session even though the server already
@@ -124,6 +130,12 @@ task.spawn(function()
 		warn(`[Client] GetPlayerData failed; welcome banner + streak badge will not render this session. Error: {tostring(data)}`)
 	end
 end)
+
+-- Sprint 10 retention: tracks whether to fire the first-time boss-tutorial
+-- toast on the next RoundStart. Set true when GetPlayerData returns
+-- hasSeenBossTutorial=false. Cleared after the toast fires (one-shot per
+-- session, server-side flag survives rejoin via MarkBossTutorialSeen).
+local shouldShowBossTutorial = false
 
 -- Current state
 local currentDragonId = "Ember"
@@ -477,13 +489,31 @@ end)
 -- canonical round-progress UI now (wave incoming/active/clear/resting).
 -- We just show "Round N" so the HUD still reflects round state, without
 -- presenting the safety-cap (240s) clock as if it were a meaningful timer.
-roundStartRemote.OnClientEvent:Connect(function(roundNumber: number, _duration: number)
+roundStartRemote.OnClientEvent:Connect(function(roundNumber: number, _duration: number, roundsUntilBoss: number?)
 	HUD.updateRoundTimer(`Round {roundNumber}`)
+	-- Sprint 10: persistent boss countdown meter under round timer.
+	-- Server fires roundsUntilBoss as the 3rd payload arg; nil-safe for
+	-- the tiny window where a stale client connects to a server still
+	-- running pre-Sprint-10 code (would never happen now but defensive).
+	HUD.setBossCountdown(roundsUntilBoss)
 	SoundManager.play("RoundStart")
 	DragonSelectUI.hide()
 	FlightController.enable()
 	CameraController.enable()
 	CombatInput.enable()
+	-- Sprint 10: first-time boss-tutorial toast. Fires on the FIRST
+	-- RoundStart of the session if the kid hasn't seen it on a previous
+	-- session. shouldShowBossTutorial is set when GetPlayerData returns;
+	-- one-shot per session via the local clear here, plus server-side
+	-- persistence via MarkBossTutorialSeen so future sessions skip too.
+	if shouldShowBossTutorial then
+		shouldShowBossTutorial = false
+		WaveTracker.showBossTutorial()
+		local markRemote = remotes:FindFirstChild("MarkBossTutorialSeen") :: RemoteEvent?
+		if markRemote then
+			markRemote:FireServer()
+		end
+	end
 end)
 
 -- Round end: show summary first, then dragon select for the rest of intermission.

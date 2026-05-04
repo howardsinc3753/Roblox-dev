@@ -36,6 +36,7 @@ local function setup()
 		RemoteNames.DragonStatsUpdated,
 		RemoteNames.DummyHit,
 		RemoteNames.MarkLairTutorialSeen,
+		RemoteNames.MarkBossTutorialSeen,
 		RemoteNames.BossTelegraph,
 		RemoteNames.BossMusicState,
 		RemoteNames.BossBannerState,

@@ -63,6 +63,12 @@ export type PlayerData = {
 	-- first ProximityPrompt trigger on the Lair Stat Stone so the 5-sec
 	-- intro hint doesn't replay on subsequent visits.
 	hasSeenLairTutorial: boolean,
+	-- Sprint 10: first-time boss-context tutorial flag. The "⚔️ Bosses
+	-- drop the biggest coin rewards. Power up your dragon to be ready!"
+	-- toast that fires on a brand-new kid's first round 1. Mirrors the
+	-- Lair tutorial pattern — flag survives rejoin so the toast doesn't
+	-- replay every session.
+	hasSeenBossTutorial: boolean,
 }
 
 local DEFAULT_DATA: PlayerData = {
@@ -79,6 +85,7 @@ local DEFAULT_DATA: PlayerData = {
 	-- all-zeros so we don't need to enumerate every dragon up front.
 	dragonUpgrades = {},
 	hasSeenLairTutorial = false,
+	hasSeenBossTutorial = false,
 }
 
 -- Deep copy so each player gets their own table
@@ -103,6 +110,7 @@ local function getDefault(): PlayerData
 		welcomeBonus = nil,
 		dragonUpgrades = {},
 		hasSeenLairTutorial = false,
+		hasSeenBossTutorial = false,
 	}
 end
 
