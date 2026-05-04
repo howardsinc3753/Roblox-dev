@@ -349,17 +349,39 @@ end
 -- copy per peer audit guidance — "next boss in 3 rounds, keep
 -- grinding" lands great after a defeat but rubs salt in the wound
 -- after a timeout. ABORTED skips entirely (server doesn't fire it).
+--
+-- First-time copy variants: server sends firstTimeUserIds map in the
+-- payload; if THIS local player just had their first boss encounter
+-- (different semantics for CLEARED vs. TIMEOUT — see server CLOSER
+-- payload comments), the copy switches to a celebratory new-player
+-- framing instead of the standard veteran cadence message.
 local function handleBossCloser(payload: any)
 	if not screenGui or not mainBanner then return end
 	screenGui.Enabled = true
 	local outcome = (payload and payload.outcome) or "CLEARED"
 	local roundsUntilNext = (payload and payload.roundsUntilNext) or 3
+	local firstTimeUserIds = (payload and payload.firstTimeUserIds) or {}
+	local isFirstTimeForLocal = firstTimeUserIds[player.UserId] == true
+
 	if outcome == "CLEARED" then
-		mainBanner.Text = `✨  Next boss in {roundsUntilNext} rounds — keep grinding!`
-		setPanelTheme(Color3.fromRGB(80, 200, 80), Color3.fromRGB(255, 255, 220))
+		if isFirstTimeForLocal then
+			mainBanner.Text = `🎉  First boss conquered! Next encounter in {roundsUntilNext} rounds.`
+			setPanelTheme(Color3.fromRGB(255, 215, 0), Color3.fromRGB(60, 40, 0))
+		else
+			mainBanner.Text = `✨  Next boss in {roundsUntilNext} rounds — keep grinding!`
+			setPanelTheme(Color3.fromRGB(80, 200, 80), Color3.fromRGB(255, 255, 220))
+		end
 	else -- TIMEOUT
-		mainBanner.Text = `Better luck next time — Blaze returns in {roundsUntilNext} rounds.`
-		setPanelTheme(Color3.fromRGB(120, 120, 130), Color3.fromRGB(220, 220, 220))
+		if isFirstTimeForLocal then
+			-- Encouraging tone for new kids who lost their first boss
+			-- fight: doesn't shame them ("better luck next time") and
+			-- gives them a clear action ("power up first").
+			mainBanner.Text = `Got a taste of Blaze! He returns in {roundsUntilNext} rounds — power up first.`
+			setPanelTheme(Color3.fromRGB(180, 140, 80), Color3.fromRGB(255, 230, 200))
+		else
+			mainBanner.Text = `Better luck next time — Blaze returns in {roundsUntilNext} rounds.`
+			setPanelTheme(Color3.fromRGB(120, 120, 130), Color3.fromRGB(220, 220, 220))
+		end
 	end
 end
 

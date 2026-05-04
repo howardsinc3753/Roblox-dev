@@ -1069,15 +1069,55 @@ RoundManager.setCallbacks(
 			end
 		end
 
+		-- Sprint 10 retention polish: closer math no longer hardcoded to
+		-- `cadence`. Dynamic computation handles the round-1-override
+		-- case correctly: after override boss at round 1, next boss is
+		-- round 3 (2 rounds away, not 3). Veteran case after round-3
+		-- boss: next is round 6 (3 rounds away). Formula:
+		--   nextBossRound = ceil((currentRound + 1) / cadence) * cadence
+		--   roundsUntilNext = nextBossRound - currentRound
+		local nextBossRound = math.ceil((roundState.roundNumber + 1) / cadence) * cadence
+		local closerRoundsUntilNext = nextBossRound - roundState.roundNumber
+
+		-- Per-player first-time-boss tag for the closer copy variant.
+		-- Built from the SAME source-of-truth moment as the analytics
+		-- tag (just-incremented bossesDefeated == 1 means "this player
+		-- just had their first boss defeat"). Sent as a userId-keyed map
+		-- in the CLOSER payload so each client can pick its own variant.
+		local closerFirstTimeUserIds: { [number]: boolean } = {}
+		if bossOutcome == "CLEARED" then
+			-- After the defeat callback, bossesDefeated has just been
+			-- incremented. Anyone whose count is exactly 1 just had
+			-- their first boss defeat.
+			for _, p in Players:GetPlayers() do
+				local data = DataManager.getData(p)
+				if data and data.stats and (data.stats.bossesDefeated or 0) == 1 then
+					closerFirstTimeUserIds[p.UserId] = true
+				end
+			end
+		elseif bossOutcome == "TIMEOUT" then
+			-- For timeouts, "first time" means they were a first-timer
+			-- going INTO this fight (still bossesDefeated == 0 because
+			-- timeout doesn't increment).
+			for _, p in Players:GetPlayers() do
+				local data = DataManager.getData(p)
+				if data and data.stats and (data.stats.bossesDefeated or 0) == 0 then
+					closerFirstTimeUserIds[p.UserId] = true
+				end
+			end
+		end
+
 		if bossOutcome == "CLEARED" then
 			bossBannerStateRemote:FireAllClients("CLOSER", {
 				outcome = "CLEARED",
-				roundsUntilNext = cadence, -- always cadence rounds after a boss
+				roundsUntilNext = closerRoundsUntilNext,
+				firstTimeUserIds = closerFirstTimeUserIds,
 			})
 		elseif bossOutcome == "TIMEOUT" then
 			bossBannerStateRemote:FireAllClients("CLOSER", {
 				outcome = "TIMEOUT",
-				roundsUntilNext = cadence,
+				roundsUntilNext = closerRoundsUntilNext,
+				firstTimeUserIds = closerFirstTimeUserIds,
 			})
 		end
 		-- ABORTED intentionally skipped — no closer banner.
@@ -1231,9 +1271,17 @@ BossManager.setOnSpawnedCallback(function(bossType: string, maxHealth: number)
 	-- Analytics: lights up the BossEncountered event scaffolded in
 	-- Sprint 9a. Fires for every player in the server (including
 	-- Lair-stayers — they SAW the encounter happen via the banner).
+	-- Sprint 10 retention polish: tag isFirstTimeBoss per-player so
+	-- the dashboard can separate veteran-cadence fights from override-
+	-- spawned new-kid fights. Captured BEFORE the encounter resolves
+	-- so a kid who's about to beat their first boss still gets tagged
+	-- as first-time (they're a first-timer GOING IN to the fight).
 	local roundState = RoundManager.getState()
 	for _, player in Players:GetPlayers() do
-		Analytics.bossEncountered(player, bossType, roundState.roundNumber)
+		local data = DataManager.getData(player)
+		local isFirstTimeBoss = data ~= nil and data.stats ~= nil
+			and (data.stats.bossesDefeated or 0) == 0
+		Analytics.bossEncountered(player, bossType, roundState.roundNumber, isFirstTimeBoss)
 	end
 	print(`[Server] {bossType} spawned with {maxHealth} HP — banner + music fired`)
 end)
@@ -1263,6 +1311,25 @@ local BOSS_SHARE_POOL = 300
 
 BossManager.setOnDefeatCallback(function(bossType: string, contributions: { [number]: number }, totalDamage: number)
 	local roundState = RoundManager.getState()
+	-- Sprint 10 retention polish: build the first-time-user map BEFORE
+	-- the bossesDefeated++ loop runs. Two reasons:
+	-- 1. Analytics tag has to capture pre-increment state — after the
+	--    increment, every kid would look like a veteran (bossesDefeated
+	--    >= 1) and the override-vs-veteran signal is lost.
+	-- 2. The CLOSER banner uses this map to pick first-time copy
+	--    variants per-player. Driven from the same source-of-truth
+	--    moment so the analytics tag and the banner copy never disagree.
+	local firstTimeUserIds: { [number]: boolean } = {}
+	for userId in contributions do
+		local p = Players:GetPlayerByUserId(userId)
+		if p then
+			local data = DataManager.getData(p)
+			if data and data.stats and (data.stats.bossesDefeated or 0) == 0 then
+				firstTimeUserIds[userId] = true
+			end
+		end
+	end
+
 	for userId, contribDmg in contributions do
 		local player = Players:GetPlayerByUserId(userId)
 		if not player then continue end -- left server mid-fight; their share is forfeit
@@ -1280,10 +1347,10 @@ BossManager.setOnDefeatCallback(function(bossType: string, contributions: { [num
 			data.stats.bossesDefeated = (data.stats.bossesDefeated or 0) + 1
 		end
 		-- Analytics: lights up the BossDefeated event (scaffolded in
-		-- Sprint 9a). damageContribution and coinReward dimensions feed
-		-- the dashboard's "boss DPS distribution" + "boss reward
-		-- distribution" charts.
-		Analytics.bossDefeated(player, bossType, roundState.roundNumber, contribDmg, payout)
+		-- Sprint 9a). isFirstTimeBoss tag is read from the map captured
+		-- BEFORE the increment above so the dashboard can separate
+		-- override-spawned encounters from veteran-cadence ones.
+		Analytics.bossDefeated(player, bossType, roundState.roundNumber, contribDmg, payout, firstTimeUserIds[userId])
 	end
 	-- Banner: "BLAZE FALLS" celebration. Commit 6 wires the client
 	-- WaveTracker handler that renders this state.
@@ -1305,11 +1372,20 @@ BossManager.setOnTimeoutCallback(function(bossType: string, hpRemainingPercent: 
 	-- No reward distribution by design (peer audit: failure → learning
 	-- loop). Analytics fires for each kid who DID damage the boss so
 	-- the dashboard can show "engaged but failed" vs. "didn't engage."
+	-- Sprint 10 retention polish: isFirstTimeBoss tag on timeouts too —
+	-- this is where the dashboard separation matters MOST. Override-
+	-- spawned new kids will timeout against Blaze far more than veterans
+	-- (0 upgrades). Without the tag, those timeouts pollute the
+	-- BossDefeated:BossTimedOut ratio and Stage 1.5 reads "kids hate
+	-- bosses" when really kids LOVE them but lost the no-upgrades fight.
 	local roundState = RoundManager.getState()
 	for userId in BossManager.getDamageContributions() do
 		local player = Players:GetPlayerByUserId(userId)
 		if player then
-			Analytics.bossTimedOut(player, bossType, roundState.roundNumber, hpRemainingPercent)
+			local data = DataManager.getData(player)
+			local isFirstTimeBoss = data ~= nil and data.stats ~= nil
+				and (data.stats.bossesDefeated or 0) == 0
+			Analytics.bossTimedOut(player, bossType, roundState.roundNumber, hpRemainingPercent, isFirstTimeBoss)
 		end
 	end
 	-- Banner: "BLAZE ESCAPES" — kid sees their failure clearly. Commit

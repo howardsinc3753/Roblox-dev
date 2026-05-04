@@ -175,22 +175,43 @@ end
 -- visible only in Studio output — the dashboard sees the events on
 -- the day Sprint 10 lands.
 
-function Analytics.bossEncountered(player: Player, bossName: string, roundNum: number)
-	fireEvent(player, "BossEncountered", roundNum, { bossName = bossName })
+-- Sprint 10 retention polish: isFirstTimeBoss tag added to all three
+-- boss events. Peer audit guidance: without this tag, the dashboard's
+-- BossDefeated:BossTimedOut ratio gets contaminated by 0-upgrade
+-- override-spawned encounters (new kids fight Blaze on round 1 with
+-- no upgrades and timeout far more often than veterans). Stage 1.5
+-- "ship Frostmaul" decision flips wrong if the data isn't separable
+-- by veteran-cadence vs. override fights.
+--
+-- Tag is captured per-player at the encounter moment — the boss is a
+-- shared entity but the "first-time-ness" is per-player, so a server
+-- with 1 veteran + 1 new kid produces ONE encounter event per dragon
+-- with different isFirstTimeBoss values. Stage 1.5 query: filter
+-- WHERE isFirstTimeBoss == false for the veteran-cadence baseline.
+-- Separate query: WHERE isFirstTimeBoss == true for retention-override
+-- impact analysis.
+
+function Analytics.bossEncountered(player: Player, bossName: string, roundNum: number, isFirstTimeBoss: boolean?)
+	fireEvent(player, "BossEncountered", roundNum, {
+		bossName = bossName,
+		isFirstTimeBoss = isFirstTimeBoss == true,
+	})
 end
 
-function Analytics.bossDefeated(player: Player, bossName: string, roundNum: number, damageContribution: number, coinReward: number)
+function Analytics.bossDefeated(player: Player, bossName: string, roundNum: number, damageContribution: number, coinReward: number, isFirstTimeBoss: boolean?)
 	fireEvent(player, "BossDefeated", roundNum, {
 		bossName = bossName,
 		damageContribution = damageContribution,
 		coinReward = coinReward,
+		isFirstTimeBoss = isFirstTimeBoss == true,
 	})
 end
 
-function Analytics.bossTimedOut(player: Player, bossName: string, roundNum: number, hpRemainingPercent: number)
+function Analytics.bossTimedOut(player: Player, bossName: string, roundNum: number, hpRemainingPercent: number, isFirstTimeBoss: boolean?)
 	fireEvent(player, "BossTimedOut", roundNum, {
 		bossName = bossName,
 		hpRemainingPercent = hpRemainingPercent,
+		isFirstTimeBoss = isFirstTimeBoss == true,
 	})
 end
 

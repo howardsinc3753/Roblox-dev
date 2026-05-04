@@ -25,6 +25,11 @@ local RunService = game:GetService("RunService")
 local EnemyConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("EnemyConfig"))
 local ZoneManager = require(script.Parent.ZoneManager)
 local BossManager = require(script.Parent.BossManager)
+-- Sprint 10 retention: read PlayerData.stats.bossesDefeated to detect
+-- whether any player on the server hasn't beaten a boss yet. Drives
+-- the round-1 override logic. DataManager doesn't import NPCManager so
+-- there's no cycle.
+local DataManager = require(script.Parent.DataManager)
 
 local NPCManager = {}
 
@@ -81,6 +86,27 @@ local MEGA_BOSS_CADENCE = 3
 -- (peer audit guidance — failure → learning loop).
 local MEGA_BOSS_FIGHT_DURATION = 90
 local MEGA_BOSS_WARNING_THRESHOLD = 30 -- "ESCAPING IN 30s" fires at this remaining
+
+-- Sprint 10 retention polish: brand-new-player round-1 override.
+-- Module-local one-shot flag — once the override fires, normal cadence
+-- resumes. The override is ADDITIVE (not replacement): the natural
+-- round-3/6/9 cadence keeps firing AFTER round 1's override boss, so
+-- override-kids see Blaze at rounds 1, 3, 6, 9... and veterans see
+-- 3, 6, 9... Override-kids get one extra boss in their first session,
+-- which is the whole point — they discover the headline feature in
+-- ~3 minutes instead of ~9.
+--
+-- Eligibility check: any player on the server has stats.bossesDefeated
+-- == 0 (i.e., they haven't beaten a boss yet, including returning-but-
+-- never-beat-one players, not just totalLogins == 1). Triggers once
+-- per server lifetime; resets on server restart so a server that
+-- never had new players doesn't carry stale state.
+--
+-- Peer audit: `isFirstTimeBoss` analytics tag (in init.server.luau's
+-- Analytics calls) keeps the override fights separable from veteran
+-- fights so the BossDefeated:BossTimedOut ratio for Stage 1.5 isn't
+-- polluted by 0-upgrade override outcomes.
+local bossOverrideTriggered = false
 
 -- Wave-flow timings. INCOMING is the telegraph window where the banner
 -- shows but no enemies have spawned yet — gives the kid 3 seconds to
@@ -859,6 +885,31 @@ function NPCManager.runWaveSequence(
 	if RunService:IsStudio() and workspace:GetAttribute("STUDIO_FORCE_MEGA_BOSS") == true then
 		isMegaBossRound = true
 	end
+
+	-- Sprint 10 retention polish: brand-new-player round-1 override.
+	-- Single biggest Day-1 retention lever per peer audit — kids see
+	-- the headline feature (Blaze) in 3 minutes instead of 9. Triggers
+	-- once per server lifetime when round 1 starts AND any player on
+	-- the server hasn't beaten a boss yet. After the round-1 override
+	-- fires, normal cadence (rounds 3/6/9...) resumes — additive, not
+	-- replacement. So override-kids see Blaze at rounds 1, 3, 6, 9
+	-- (one extra boss in first session); veterans still see 3, 6, 9.
+	if not bossOverrideTriggered and roundNumber == 1 and isRoundActive() then
+		local hasFirstTimer = false
+		for _, p in Players:GetPlayers() do
+			local data = DataManager.getData(p)
+			if data and data.stats and (data.stats.bossesDefeated or 0) == 0 then
+				hasFirstTimer = true
+				break
+			end
+		end
+		if hasFirstTimer then
+			bossOverrideTriggered = true
+			isMegaBossRound = true
+			print(`[NPCManager] Round 1 override: spawning Blaze for first-time player(s)`)
+		end
+	end
+
 	if isRoundActive() and isMegaBossRound then
 		print(`[NPCManager] Round {roundNumber} is a Mega-Boss-Round; spawning Blaze`)
 		-- Sprint 10 audit fix: count ARENA players, not total server
