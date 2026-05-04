@@ -294,6 +294,12 @@ upgradeStatRemote.OnServerEvent:Connect(function(player: Player, dragonIdRaw: un
 	-- 3/sec is plenty — the audit flagged a kid double-clicking the +Atk
 	-- button as the realistic abuse vector, not a sustained spam.
 	if not RateLimiter.check(player, "UpgradeStat", 3) then return end
+	-- POST-AUDIT FIX: enforce design intent that upgrades only happen at the
+	-- Lair Stat Stone. The modal is only opened via the Lair ProximityPrompt,
+	-- but a malicious client could call this remote directly mid-Arena —
+	-- this gate locks the upgrade flow to the safe zone where it belongs.
+	-- Not a security issue (it's the player's own coins), just a design gate.
+	if not ZoneManager.isPlayerInLair(player) then return end
 	if typeof(dragonIdRaw) ~= "string" then return end
 	if typeof(statKeyRaw) ~= "string" then return end
 	local dragonId = dragonIdRaw :: string
@@ -330,7 +336,15 @@ upgradeStatRemote.OnServerEvent:Connect(function(player: Player, dragonIdRaw: un
 	-- the buff lands immediately — no death/respawn required. Health upgrades
 	-- bump maxHealth + heal the delta; damage upgrades affect the next breath.
 	-- See CombatManager.applyLiveStatChange.
-	if data.selectedDragon == dragonId then
+	--
+	-- POST-AUDIT FIX: gate on state.dragonId (what the kid is ACTUALLY flying
+	-- right now) instead of data.selectedDragon (their last menu pick).
+	-- Race window: between SelectDragon firing and DragonSpawner.spawn
+	-- installing the new combat state, selectedDragon is the new dragon
+	-- but state.dragonId is still the old one. Using state.dragonId means
+	-- live apply only fires when the in-combat reality matches the upgrade.
+	local activeState = CombatManager.getState(player)
+	if activeState and activeState.dragonId == dragonId then
 		CombatManager.applyLiveStatChange(player)
 	end
 
@@ -372,7 +386,7 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	if not RateLimiter.check(player, "FireBreath", 5) then return end
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
 	if not CombatManager.canFireBreath(player) then return end
-	if not RoundManager.isActive() then return end
+
 	-- Sprint 5 Part D: no PvP / NPC combat from the Lair.
 	-- Sprint 7 carve-out: practice dummies are a valid Lair target so kids
 	-- can test their just-purchased upgrades. The carve-out is narrow on
@@ -384,6 +398,12 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	-- CombatManager helpers also gate defensively (findHitPlayer /
 	-- findPlayersInCone return empty for Lair shooters), so the Lair-only
 	-- targeting rule holds even if this branch were edited.
+	--
+	-- POST-AUDIT FIX: Lair branch runs BEFORE RoundManager.isActive() check.
+	-- Why: kids visit the Lair primarily during intermission (port out of
+	-- Arena → upgrade → test). The whole "test your new upgrade on the
+	-- dummy" promise only lands if the dummy reacts during intermission.
+	-- The Arena path below still requires an active round.
 	if ZoneManager.isPlayerInLair(player) then
 		CombatManager.recordBreath(player)
 		local state = CombatManager.getState(player)
@@ -416,6 +436,12 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 		end
 		return -- preserve the no-PvP/no-NPC rule from Sprint 5 Part D
 	end
+
+	-- Arena path requires an active round. Moved here from the top of the
+	-- handler so the Lair dummy branch above can run during intermission —
+	-- otherwise the "test your upgrade on the dummy" UX breaks at the
+	-- exact moment kids want to use it.
+	if not RoundManager.isActive() then return end
 
 	CombatManager.recordBreath(player)
 
