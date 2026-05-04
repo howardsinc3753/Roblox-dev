@@ -50,6 +50,7 @@ init.server.luau  (entry — RUNS FIRST, errors here = total breakage)
 ├── ArenaBuilder.luau         ← floating-island geometry
 ├── LairBuilder.luau          ← Crystal Lair (Sprint 5)
 ├── ZoneManager.luau          ← Sprint 5 Part C: Lair sphere test + Player.Zone attribute
+├── DragonProgression.luau    ← Sprint 7: per-dragon stat upgrades, cost curve, atomic tryUpgrade
 ├── NPCManager.luau           ← AI dragons + Sprint 6 wave state machine (runWaveSequence)
 │   └── EnemyConfig (shared)
 └── RateLimiter.luau          ← per-player remote spam prevention
@@ -74,7 +75,8 @@ init.client.luau (entry — depends on remotes existing!)
 ├── WelcomeBanner.luau        ← daily login welcome popup
 ├── MobileControls.luau       ← touch joystick + buttons (only on mobile)
 ├── SafeZoneIndicator.luau    ← Sprint 5 Part C: "SAFE ZONE" pill, attribute-driven
-└── WaveTracker.luau          ← Sprint 6: wave-state HUD (incoming / counter / clear / rest)
+├── WaveTracker.luau          ← Sprint 6: wave-state HUD (incoming / counter / clear / rest)
+└── DragonUpgradeUI.luau      ← Sprint 7: stat-upgrade modal (multi-dragon tabs, preview, confirm)
 ```
 
 ### Shared (`src/shared/`)

@@ -178,11 +178,59 @@ Audit findings deferred / declined:
   often). Not a Sprint 6 regression. Flagged for a later round-system
   cleanup pass.
 
-### Sprint 7 — Dragon Progression UI in Lair (~10-12 hours)
-- Stat board: see your dragon's level, XP bar, current stats
-- Upgrade station: spend coins on Atk/Def/Spd/Special points
-- Practice dummies: test your damage on harmless NPCs
-- Save progression in DataManager (extend PlayerData schema)
+### Sprint 7 — Dragon Progression UI in Lair (~9-11 hours) ✅ shipped
+
+Use case: Sprint 6 promised "💡 visit your Lair to catch your breath!" but
+the Lair was decorative — obelisks did nothing, dummies didn't react. Kids
+followed the tip and bounced. Sprint 7 makes the visit meaningful: spend
+coins on per-dragon stat upgrades, see your dragon's level grow, test new
+damage on practice dummies. Closes the dopamine loop: earn coins → buy
+upgrade → test on dummy → see bigger number → fight harder.
+
+- ✅ `DragonProgression.luau`: per-dragon stat upgrades (Atk / Def / Spd /
+  Special), 5 levels each, cost curve 25/100/200/400/800 (peer audit
+  rebalance — first rank cheap enough to taste in round 1, exponential
+  from there). Spd uses diminishing returns 5/3/3/2/2 = +15 max so it
+  doesn't break PvE/PvP balance. Atomic `tryUpgrade` with per-player
+  upgrade-in-flight lock (anti-double-click race) + force-save +
+  rollback on save failure.
+- ✅ Per-dragon upgrades (not shared) — gives each dragon identity and
+  ongoing reasons to spend coins beyond unlocking new dragons. Mastery
+  cross-dragon scaling deferred until playtest reveals if rebuilds are
+  actually painful.
+- ✅ `CombatManager.applyLiveStatChange`: a kid who upgrades mid-round
+  (Lair retreat → buy → portal back) sees the buff immediately, no
+  death/respawn required. Health upgrades bump maxHealth + heal the
+  delta; damage upgrades affect the next breath; speed flows through
+  `DragonStatsUpdated` → `FlightController` cache.
+- ✅ All combat damage paths (fireBreath, useSpecial Fire/Lightning) read
+  state.damage / state.specialDamage so upgrades flow through.
+- ✅ `DragonUpgradeUI.luau`: modal panel with multi-dragon tabs (kids own
+  multiple dragons, can upgrade any of them without leaving the Lair),
+  per-stat row with current value + level dots + upgrade button + stat
+  preview "Lv N → N+1: 15 → 20", MAX badge, confirmation prompt for
+  purchases ≥200 coins, first-visit tutorial hint.
+- ✅ Lair Stat Stone: tagged + ProximityPrompt (range 6, RequiresLineOfSight)
+  → opens the upgrade modal client-side.
+- ✅ Lair Shop Stone: tagged + "🔒 Coming Soon" sub-label so kids who walk
+  up to it don't bounce off thinking it's broken (Sprint 9 wires it up).
+- ✅ Practice dummies: HP state + hit-detection API + KO/respawn loop.
+  Sprint 5 Part D fireBreath gate now has a narrow Lair-only carve-out
+  routing breath cones to dummy-damage (committed separately for
+  blast-radius isolation).
+- ✅ HUD: "Lv N" badge next to dragon-name label so a kid who spent 800
+  coins on Atk Lv 5 sees their progression in combat (otherwise the
+  upgrade is invisible during gameplay — peer #2).
+- ✅ `WaveTracker` rest-period tip now points at the Stat Stone explicitly.
+- ✅ STUDIO_MAXED_UPGRADES toggle for combat-balance testing;
+  STUDIO_FRESH_PLAYER takes precedence so the new-player flow stays QA-able.
+- ✅ Persistence: `PlayerData.dragonUpgrades` + `hasSeenLairTutorial` fields,
+  deepMerge migration handles pre-Sprint-7 saves.
+
+Audit findings deferred (revisit post-QA):
+- #11 affordability sparkle on coin counter (polish-on-polish)
+- #14 Mastery cross-dragon scaling (wait for playtest data on rebuild pain)
+- #17 deepMerge migration manual verification with a real pre-Sprint-7 save
 
 ### Sprint 8 — First-time Tutorial (~4-5 hours)
 - Detect first-ever join (`data.totalLogins == 1` — peer Claude already tracks this)
