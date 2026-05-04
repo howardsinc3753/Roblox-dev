@@ -29,6 +29,8 @@ local function setup()
 		RemoteNames.NPCBreathFired,
 		RemoteNames.LockOnTarget,
 		RemoteNames.LockedByEnemy,
+		RemoteNames.UseShield,
+		RemoteNames.ShieldActivated,
 	}
 
 	for _, name in eventNames do

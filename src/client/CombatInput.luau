@@ -32,17 +32,21 @@ local currentDragonId = "Ember"
 -- Cooldown tracking (client-side prediction)
 local lastBreathTime = 0
 local lastSpecialTime = 0
-local BREATH_COOLDOWN = 0.5
+local lastShieldTime = 0
+local BREATH_COOLDOWN = 0.25 -- kid playtest: 0.5 felt sluggish; 0.25 = 4 attacks/sec
 local SPECIAL_COOLDOWN = 10.0
+local SHIELD_COOLDOWN = 12.0 -- defensive ability cooldown
 
 -- Remotes (set after they're available)
 local fireBreathRemote: RemoteEvent?
 local useSpecialRemote: RemoteEvent?
+local useShieldRemote: RemoteEvent?
 
 function CombatInput.init()
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
 	fireBreathRemote = remotes:WaitForChild("FireBreath") :: RemoteEvent
 	useSpecialRemote = remotes:WaitForChild("UseSpecial") :: RemoteEvent
+	useShieldRemote = remotes:WaitForChild("UseShield") :: RemoteEvent
 end
 
 function CombatInput.setDragon(dragonId: string)
@@ -65,6 +69,11 @@ end
 function CombatInput.getSpecialCooldownPercent(): number
 	local elapsed = tick() - lastSpecialTime
 	return math.clamp(elapsed / SPECIAL_COOLDOWN, 0, 1)
+end
+
+function CombatInput.getShieldCooldownPercent(): number
+	local elapsed = tick() - lastShieldTime
+	return math.clamp(elapsed / SHIELD_COOLDOWN, 0, 1)
 end
 
 -- Element-specific breath visuals. Each entry tunes the projectile shape,
@@ -335,6 +344,21 @@ local function fireSpecial()
 	end
 end
 
+-- Defensive shield. Pops the bubble that absorbs 80% of incoming damage
+-- for 4 seconds. 12-second cooldown so it's a planned commit, not a panic
+-- mash. Server is authoritative — client cooldown is for HUD feel + spam
+-- prevention; server re-checks via CombatManager.canUseShield.
+local function fireShield()
+	if not enabled then return end
+	if (tick() - lastShieldTime) < SHIELD_COOLDOWN then return end
+
+	lastShieldTime = tick()
+
+	if useShieldRemote then
+		useShieldRemote:FireServer()
+	end
+end
+
 -- Public proxies so MobileControls (touch buttons) can trigger the same
 -- actions as the keyboard/mouse without us synthesizing fake input events.
 function CombatInput.fireBreath()
@@ -343,6 +367,10 @@ end
 
 function CombatInput.fireSpecial()
 	fireSpecial()
+end
+
+function CombatInput.fireShield()
+	fireShield()
 end
 
 UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
@@ -359,6 +387,15 @@ UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: 
 		or input.UserInputType == Enum.UserInputType.MouseButton2
 		or input.KeyCode == Enum.KeyCode.ButtonL2 then
 		fireSpecial()
+	end
+
+	-- Shield: R (keyboard) OR X (Square on PS5, X button on Xbox controller).
+	-- Picked R because it's free on KB and the natural "ready/raise shield"
+	-- key in many games. ButtonX is the only major face button left after A
+	-- (boost), B (cancel/menu close), Y (open menu).
+	if input.KeyCode == Enum.KeyCode.R
+		or input.KeyCode == Enum.KeyCode.ButtonX then
+		fireShield()
 	end
 end)
 

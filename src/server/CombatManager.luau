@@ -18,11 +18,19 @@ export type CombatState = {
 	lastBreathTime: number,
 	lastSpecialTime: number,
 	lastDamageTime: number, -- updated on damage taken OR dealt; gates HP regen
+	-- Defensive shield. Set by useShield(); applyDamage checks if tick() <
+	-- shieldActiveUntil and reduces incoming damage by SHIELD_DAMAGE_REDUCTION.
+	-- lastShieldTime gates the cooldown so kids can't spam it.
+	lastShieldTime: number,
+	shieldActiveUntil: number,
 }
 
 local playerStates: { [number]: CombatState } = {}
-local BREATH_COOLDOWN = 0.5
+local BREATH_COOLDOWN = 0.25 -- kid playtest: 0.5 felt sluggish; rate limit (5/sec) is still the upper cap
 local SPECIAL_COOLDOWN = 10.0
+local SHIELD_COOLDOWN = 12.0 -- defensive ability — slightly longer than special so it's a planned commit
+local SHIELD_DURATION = 4.0 -- seconds the shield is active after pop
+local SHIELD_DAMAGE_REDUCTION = 0.8 -- 80% damage absorbed; 20% leaks through (not invulnerable)
 local BREATH_RANGE = 100 -- studs
 
 -- HP regen out of combat. Discourages kamikaze respawn loops and gives
@@ -72,6 +80,8 @@ function CombatManager.initPlayer(player: Player, dragonId: string)
 		lastBreathTime = 0,
 		lastSpecialTime = 0,
 		lastDamageTime = 0,
+		lastShieldTime = 0,
+		shieldActiveUntil = 0,
 	}
 	playerStates[player.UserId] = state
 	syncHealthToHumanoid(player, state)
@@ -115,11 +125,46 @@ function CombatManager.recordSpecial(player: Player)
 	end
 end
 
--- Apply damage to a target. Returns (killed: boolean, actualDamage: number)
+-- Defensive shield. Pops a 4-second damage-reduction bubble. The actual
+-- damage absorption happens in applyDamage which checks shieldActiveUntil
+-- and scales incoming damage by (1 - SHIELD_DAMAGE_REDUCTION).
+function CombatManager.canUseShield(player: Player): boolean
+	local state = playerStates[player.UserId]
+	if not state or not state.alive then
+		return false
+	end
+	return (tick() - state.lastShieldTime) >= SHIELD_COOLDOWN
+end
+
+function CombatManager.useShield(player: Player): boolean
+	if not CombatManager.canUseShield(player) then return false end
+	local state = playerStates[player.UserId]
+	if not state then return false end
+	state.lastShieldTime = tick()
+	state.shieldActiveUntil = tick() + SHIELD_DURATION
+	return true
+end
+
+function CombatManager.isShielded(player: Player): boolean
+	local state = playerStates[player.UserId]
+	if not state then return false end
+	return tick() < state.shieldActiveUntil
+end
+
+-- Apply damage to a target. Returns (killed: boolean, actualDamage: number).
+-- Active shield reduces incoming damage by SHIELD_DAMAGE_REDUCTION (kid
+-- play balance: 80% absorbed, 20% leaks). Damage shown to victim is the
+-- POST-reduction value so the floating "-N" matches the HP drop.
 function CombatManager.applyDamage(target: Player, damage: number): (boolean, number)
 	local state = playerStates[target.UserId]
 	if not state or not state.alive then
 		return false, 0
+	end
+
+	-- Shield check: scale incoming damage if the bubble is still up
+	if tick() < state.shieldActiveUntil then
+		damage = math.floor(damage * (1 - SHIELD_DAMAGE_REDUCTION) + 0.5)
+		if damage < 1 then damage = 1 end -- always tick at least 1 so chip damage is visible
 	end
 
 	state.health = math.max(0, state.health - damage)
@@ -153,6 +198,7 @@ function CombatManager.respawn(player: Player)
 			state.maxHealth = dragon.health
 			state.alive = true
 			state.lastDamageTime = 0 -- fresh respawn, regen ready immediately if hurt
+			state.shieldActiveUntil = 0 -- drop any shield carrying over from pre-death
 			syncHealthToHumanoid(player, state)
 		end
 	end

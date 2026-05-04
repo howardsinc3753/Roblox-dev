@@ -8,6 +8,9 @@ return {
 	UnlockDragon = "UnlockDragon",
 	FireBreath = "FireBreath",
 	UseSpecial = "UseSpecial",
+	-- Defensive shield bubble (R key / X button on gamepad). Server validates
+	-- cooldown and broadcasts ShieldActivated so all clients render the visual.
+	UseShield = "UseShield",
 	-- Lock-on telemetry. Client fires when its lock-on target changes (player
 	-- userId, or 0 to clear). Server uses this to warn the locked player.
 	LockOnTarget = "LockOnTarget",
@@ -22,6 +25,9 @@ return {
 	UpdateScoreboard = "UpdateScoreboard",
 	SyncTimer = "SyncTimer",
 	SpecialEffect = "SpecialEffect",
+	-- Server → all: someone activated their shield. Client renders the
+	-- defensive bubble around that player's dragon for SHIELD_DURATION sec.
+	ShieldActivated = "ShieldActivated",
 	-- NPC-specific events. Kept separate from DamagePlayer/PlayerKO so the
 	-- client can render damage numbers + breath projectiles on NPC models
 	-- without needing a Player object lookup.
