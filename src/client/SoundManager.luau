@@ -178,39 +178,31 @@ function SoundManager.setMusicVolume(volume: number)
 	if arenaMusic then arenaMusic.Volume = v end
 end
 
--- Sprint 10: boss music swap. Pitch-shifts the arena music up + bumps
--- volume during a Mega Boss fight so the kid's brain registers "this
--- matters, pay attention" without needing a new asset upload (peer
--- audit guidance — pitch-shift of existing music works for MVP).
--- Reverts to baseline on victory/timeout. The pitch + volume live on
--- the existing arenaMusic sound so the existing setZone crossfade
--- still works correctly when the kid ports back to the Lair mid-fight
--- (boss music fades out, lair music fades in — same path as normal).
+-- Sprint 10: boss music swap. Pitch-shifts the arena music up during
+-- a Mega Boss fight so the kid's brain registers "this matters, pay
+-- attention" without needing a new asset upload (peer audit guidance
+-- — pitch-shift of existing music works for MVP). Reverts to baseline
+-- on victory/timeout. The pitch lives on the existing arenaMusic sound
+-- so the existing setZone crossfade still works correctly when the kid
+-- ports back to the Lair mid-fight (boss music fades out, lair music
+-- fades in — same path as normal).
+--
+-- Volume bump is intentionally NOT applied: setZone writes to
+-- arenaMusic.Volume every frame for the Lair/Arena crossfade, so any
+-- volume tween here would be overwritten. If a future commit wants
+-- volume punch, route it via a multiplier attribute that setZone reads.
 local BOSS_PITCH = 1.3
 local BASELINE_PITCH = 1.0
-local BOSS_VOLUME_MULTIPLIER = 1.5
 
 function SoundManager.setBossMusicActive(active: boolean)
 	if not arenaMusic then return end
-	-- Use TweenService for the pitch + volume ramp so the swap doesn't
-	-- snap-cut. The PlaybackSpeed change is the headline effect; the
-	-- volume bump is secondary.
 	local TweenService = game:GetService("TweenService")
 	local targetPitch = if active then BOSS_PITCH else BASELINE_PITCH
-	local targetVolume = if active then MUSIC_VOLUME * BOSS_VOLUME_MULTIPLIER else MUSIC_VOLUME
-	-- Only animate if the player is currently hearing arena music — if
-	-- they're in the Lair, the arena music volume is ~0 and the
-	-- crossfade will resolve correctly when they portal back.
 	local tween = TweenService:Create(arenaMusic,
 		TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
 		{ PlaybackSpeed = targetPitch }
 	)
 	tween:Play()
-	-- Volume isn't tweened directly because setZone is also writing to
-	-- it every frame. Instead, store the multiplier as an attribute the
-	-- setZone function reads. Defer this enhancement; for MVP the pitch
-	-- shift carries enough signal on its own.
-	_ = targetVolume
 end
 
 function SoundManager.playAtPosition(name: string, position: Vector3)

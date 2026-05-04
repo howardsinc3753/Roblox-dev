@@ -311,8 +311,18 @@ end
 -- the model. Distinct from the plain despawn() so a "force cleanup"
 -- caller (round force-end) doesn't accidentally trigger the
 -- "BOSS ESCAPED" banner — they should call despawn() directly.
+--
+-- Sprint 10 audit fix: alive-guard on entry. Race window: boss dies at
+-- second 89.99 (player damage flips alive=false), polling loop sees
+-- elapsed >= 90 on the next iteration and tries to fire timeoutDespawn
+-- on a now-dead boss. Without the guard, that fires a "BLAZE ESCAPED"
+-- banner + BossTimedOut analytics for a boss that was actually killed.
+-- The polling loop's BossManager.isActive() check usually catches this
+-- (returns false for dead bosses), but task.wait + applyDamage
+-- coordination isn't synchronous so the race exists. Cheap belt-and-
+-- suspenders: refuse to fire timeout for an already-dead boss.
 function BossManager.timeoutDespawn()
-	if not activeBoss then return end
+	if not activeBoss or not activeBoss.alive then return end
 	local hpPct = if activeBoss.maxHealth > 0 then activeBoss.currentHealth / activeBoss.maxHealth else 0
 	if onTimeoutCallback then
 		-- Pass the contributions table reference so the callback can

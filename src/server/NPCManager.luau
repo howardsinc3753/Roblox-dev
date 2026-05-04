@@ -849,9 +849,24 @@ function NPCManager.runWaveSequence(
 	-- shipping — kid sees the model, knows something's coming.
 	if isRoundActive() and roundNumber % MEGA_BOSS_CADENCE == 0 then
 		print(`[NPCManager] Round {roundNumber} is a Mega-Boss-Round; spawning Blaze`)
-		-- Player-count snapshot at spawn — peer audit explicitly
-		-- guards against dynamic mid-fight rescaling. Locked here.
-		local activePlayerCount = #Players:GetPlayers()
+		-- Sprint 10 audit fix: count ARENA players, not total server
+		-- players. Original `#Players:GetPlayers()` would inflate boss HP
+		-- when kids were AFK in the Lair (shopping the upgrade modal,
+		-- afk-streaming chat, etc.) — a 4-player server with 1 Arena
+		-- combatant + 3 Lair-stayers would spawn a 4× HP boss against
+		-- a solo kid, who'd timeout and conclude bosses are broken.
+		-- ZoneManager is already imported (Sprint 5 Part D); reusing
+		-- isPlayerInLair gives us the right population for HP scaling.
+		-- math.max(1, ...) floors the count so a between-frames race
+		-- (everyone porting Lair-ward as the wave-3 ends) can't hand
+		-- a 0× HP boss that dies on the first hit.
+		local activePlayerCount = 0
+		for _, p in Players:GetPlayers() do
+			if not ZoneManager.isPlayerInLair(p) then
+				activePlayerCount += 1
+			end
+		end
+		activePlayerCount = math.max(1, activePlayerCount)
 		local boss = BossManager.spawnBlaze(activePlayerCount)
 		if boss then
 			local startTime = tick()
@@ -859,8 +874,15 @@ function NPCManager.runWaveSequence(
 			-- Track whether the 30-second warning has fired so we don't
 			-- spam it on every poll cycle. One-shot per encounter.
 			local warningFired = false
+			-- Sprint 10 audit fix: tightened from 0.5s → 0.1s. Original
+			-- 0.5s polling could fire the warning banner up to 500ms
+			-- after the true 30s-remaining mark, and the timeout up to
+			-- 500ms late. With the kid-visible countdown ticking
+			-- "30, 29, 28..." that drift was visible. 0.1s polling
+			-- is 10× more iterations (~900 over a 90s fight vs ~180)
+			-- but each iteration is a tick + arithmetic — negligible.
 			while isRoundActive() and BossManager.isActive() do
-				task.wait(0.5)
+				task.wait(0.1)
 				local elapsed = tick() - startTime
 				-- Sprint 10 commit 6: fire "BOSS ESCAPING IN 30s" once
 				-- when fight time crosses the warning threshold (60s
