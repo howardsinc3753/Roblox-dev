@@ -115,41 +115,59 @@ end
 -- To swap: pick another Audio asset from create.roblox.com/store and replace
 -- the ID below. Verify the creator is trusted (Distrokid, official Roblox
 -- audio, or your own uploads) — random user uploads often get moderated away.
--- Calm "Rainy Window" track. User picked this as the Lair atmosphere —
--- peaceful, not battle-intense. Future: zone-aware switching between this
--- and combat music when player crosses Arena/Lair boundary.
-local BACKGROUND_MUSIC_ID = "rbxassetid://83298024686703"
-local BACKGROUND_MUSIC_VOLUME = 0.25
+-- Two music tracks running in parallel: Lair (calm) + Arena (battle).
+-- Both Sound objects play continuously at low volume; we crossfade their
+-- volumes via SoundManager.setZone() based on the player's altitude. This
+-- avoids start/stop pop and gives a smooth audio transition between zones.
+local LAIR_MUSIC_ID = "rbxassetid://83298024686703" -- Rainy Window (user-Got'd)
+local ARENA_MUSIC_ID = "rbxassetid://137677840690864" -- Drinking Horns (DistrokidOfficial)
+local MUSIC_VOLUME = 0.25
 
-local backgroundMusic: Sound? = nil
+local lairMusic: Sound? = nil
+local arenaMusic: Sound? = nil
 
 function SoundManager.startMusic()
-	if BACKGROUND_MUSIC_ID == "" then
-		warn("[SoundManager] Background music disabled — no asset ID set.")
-		return
-	end
-	if backgroundMusic then return end
-	backgroundMusic = Instance.new("Sound")
-	backgroundMusic.Name = "BackgroundMusic"
-	backgroundMusic.SoundId = BACKGROUND_MUSIC_ID
-	backgroundMusic.Volume = BACKGROUND_MUSIC_VOLUME
-	backgroundMusic.Looped = true
-	backgroundMusic.Parent = SoundService
-	backgroundMusic:Play()
+	if lairMusic then return end -- already started
+
+	lairMusic = Instance.new("Sound")
+	lairMusic.Name = "LairMusic"
+	lairMusic.SoundId = LAIR_MUSIC_ID
+	lairMusic.Volume = MUSIC_VOLUME -- starts in Lair = full volume
+	lairMusic.Looped = true
+	lairMusic.Parent = SoundService
+	lairMusic:Play()
+
+	arenaMusic = Instance.new("Sound")
+	arenaMusic.Name = "ArenaMusic"
+	arenaMusic.SoundId = ARENA_MUSIC_ID
+	arenaMusic.Volume = 0 -- silent in Lair, swells when player enters Arena
+	arenaMusic.Looped = true
+	arenaMusic.Parent = SoundService
+	arenaMusic:Play()
+end
+
+-- Smoothly crossfade between Lair and Arena tracks based on whether the
+-- player is currently in the Lair zone. Called from init.client.luau
+-- Heartbeat with dt so the fade is frame-rate-independent.
+function SoundManager.setZone(isInLair: boolean, dt: number)
+	if not lairMusic or not arenaMusic then return end
+	local lairTarget = if isInLair then MUSIC_VOLUME else 0
+	local arenaTarget = if isInLair then 0 else MUSIC_VOLUME
+	local alpha = 1 - math.exp(-1.5 * dt) -- ~1.3s for full crossfade
+	lairMusic.Volume = lairMusic.Volume + (lairTarget - lairMusic.Volume) * alpha
+	arenaMusic.Volume = arenaMusic.Volume + (arenaTarget - arenaMusic.Volume) * alpha
 end
 
 function SoundManager.stopMusic()
-	if backgroundMusic then
-		backgroundMusic:Stop()
-		backgroundMusic:Destroy()
-		backgroundMusic = nil
-	end
+	if lairMusic then lairMusic:Destroy(); lairMusic = nil end
+	if arenaMusic then arenaMusic:Destroy(); arenaMusic = nil end
 end
 
 function SoundManager.setMusicVolume(volume: number)
-	if backgroundMusic then
-		backgroundMusic.Volume = math.clamp(volume, 0, 1)
-	end
+	-- Legacy single-volume setter; scales both tracks proportionally
+	local v = math.clamp(volume, 0, 1)
+	if lairMusic then lairMusic.Volume = v end
+	if arenaMusic then arenaMusic.Volume = v end
 end
 
 function SoundManager.playAtPosition(name: string, position: Vector3)

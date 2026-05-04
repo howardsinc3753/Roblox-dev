@@ -746,6 +746,15 @@ RunService.Heartbeat:Connect(function(dt: number)
 	-- Lock-on validity check: clears the lock if target died, despawned, or
 	-- moved out of cone/range. Cheap (~no-op when no lock is active).
 	LockOnController.update()
+
+	-- Zone-based music crossfade. Lair sits at Y=500; Arena around Y=50.
+	-- Y > 300 = in Lair. Crude altitude check is enough until ZoneManager
+	-- (Sprint 5 Part C) lands and can be the canonical zone source.
+	local character = player.Character
+	if character and character.PrimaryPart then
+		local inLair = character.PrimaryPart.Position.Y > 300
+		SoundManager.setZone(inLair, dt)
+	end
 end)
 
 -- Hotkey handler. Tab is reserved by Roblox for the playerlist UI, so
