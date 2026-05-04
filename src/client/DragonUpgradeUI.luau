@@ -196,6 +196,7 @@ local function showConfirm(title: string, onConfirm: () -> ())
 	confirmBtn.Font = Enum.Font.GothamBold
 	confirmBtn.TextSize = 18
 	confirmBtn.BorderSizePixel = 0
+	confirmBtn.Selectable = true -- gamepad: D-pad needs this to land here
 	confirmBtn.Parent = box
 
 	local confirmCorner = Instance.new("UICorner")
@@ -211,6 +212,7 @@ local function showConfirm(title: string, onConfirm: () -> ())
 	cancelBtn.Font = Enum.Font.GothamBold
 	cancelBtn.TextSize = 18
 	cancelBtn.BorderSizePixel = 0
+	cancelBtn.Selectable = true -- gamepad
 	cancelBtn.Parent = box
 
 	local cancelCorner = Instance.new("UICorner")
@@ -374,6 +376,11 @@ local function buildStatRow(parent: Frame, dragonId: string, meta: any, layoutOr
 		btn.BorderSizePixel = 0
 		btn.AutoButtonColor = canAfford
 		btn.Active = canAfford
+		-- Gamepad navigation: only the rows with an affordable upgrade are
+		-- selectable. Non-affordable rows are still rendered so the kid sees
+		-- what's possible, but D-pad skips them — same logic as the click
+		-- gating above (`if canAfford then ... :Connect`).
+		btn.Selectable = canAfford
 		btn.Parent = row
 		local btnCorner = Instance.new("UICorner")
 		btnCorner.CornerRadius = UDim.new(0, 8)
@@ -405,6 +412,7 @@ local function buildTab(parent: Frame, dragonId: string, layoutOrder: number)
 	btn.BorderSizePixel = 0
 	btn.AutoButtonColor = true -- click both owned + locked tabs
 	btn.Active = true
+	btn.Selectable = true -- gamepad: D-pad needs to land on tab strip
 	btn.Parent = parent
 	local btnCorner = Instance.new("UICorner")
 	btnCorner.CornerRadius = UDim.new(0, 8)
@@ -476,6 +484,7 @@ local function buildUnlockPanel(parent: Frame, dragonId: string)
 	buyBtn.BorderSizePixel = 0
 	buyBtn.AutoButtonColor = canAfford
 	buyBtn.Active = canAfford
+	buyBtn.Selectable = canAfford -- gamepad: only navigable when actually buyable
 	buyBtn.LayoutOrder = 3
 	buyBtn.Parent = parent
 	local buyCorner = Instance.new("UICorner")
@@ -564,6 +573,11 @@ function DragonUpgradeUI.create()
 	backdrop.Text = ""
 	backdrop.AutoButtonColor = false
 	backdrop.BorderSizePixel = 0
+	-- Explicitly NOT navigable: full-screen click-to-close target, but we
+	-- don't want D-pad to ever land here (it'd consume the cursor instead
+	-- of letting it cycle through tabs/upgrade buttons). Mouse + touch can
+	-- still click it directly.
+	backdrop.Selectable = false
 	backdrop.Parent = screenGui
 	backdrop.Activated:Connect(function() DragonUpgradeUI.close() end)
 
@@ -620,6 +634,7 @@ function DragonUpgradeUI.create()
 	closeBtn.Font = Enum.Font.GothamBold
 	closeBtn.TextSize = 18
 	closeBtn.BorderSizePixel = 0
+	closeBtn.Selectable = true -- gamepad
 	closeBtn.Parent = card
 	local closeCorner = Instance.new("UICorner")
 	closeCorner.CornerRadius = UDim.new(0.5, 0)
@@ -689,7 +704,6 @@ function DragonUpgradeUI.open()
 	-- "their" stats first. They can tap a tab to switch.
 	activeTab = if unlockedDragons[selectedDragon] then selectedDragon else "Ember"
 	rebuild()
-	screenGui.Enabled = true
 
 	-- POST-PLAYTEST FIX: suspend gameplay input while the modal is open.
 	-- Three things to handle:
@@ -702,6 +716,10 @@ function DragonUpgradeUI.open()
 	-- RoundEnd / death) to override our restoration if the round
 	-- transitioned while the modal was open — those handlers are
 	-- idempotent.
+	--
+	-- These run BEFORE screenGui.Enabled = true so there's no sub-frame
+	-- window where the modal is visible but flight/combat are still hot
+	-- (a click during that window would fire breath through the modal).
 	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
 	CameraController.disable()
 	FlightController.disable()
@@ -710,6 +728,8 @@ function DragonUpgradeUI.open()
 	-- time the modal is open (LinearVelocity constraint persists).
 	FlightController.halt()
 	CombatInput.disable()
+
+	screenGui.Enabled = true
 
 	-- Gamepad navigation (Xbox playtest target): set a sensible default
 	-- selection so D-pad works immediately. Picks the first stat row's
@@ -750,7 +770,13 @@ function DragonUpgradeUI.close()
 	if confirmOverlay then confirmOverlay.Visible = false end
 
 	-- Restore gameplay input. See open() for why we disabled them.
-	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	-- MouseBehavior only meaningful when there's a mouse — touch / gamepad-
+	-- only sessions don't have one and Roblox no-ops the call there, but
+	-- guarding explicitly mirrors the pattern CameraController.enable()
+	-- already uses.
+	if UserInputService.MouseEnabled then
+		UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	end
 	CameraController.enable()
 	FlightController.enable()
 	CombatInput.enable()
