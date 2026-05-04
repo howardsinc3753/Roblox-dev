@@ -161,7 +161,20 @@ end
 -- no DataManager entry, no spawn, no state.scores entry). End-of-round
 -- showed "No Winner" / empty leaderboard / 0 coins because the only
 -- player had no score record.
+
+-- Idempotency guard. There's a tiny window between Connect and the
+-- catch-up loop below where a player joining at exactly that moment
+-- could appear in BOTH paths — PlayerAdded fires AND they're already in
+-- Players:GetPlayers(). Without this guard, processLogin would
+-- double-credit the daily bonus, setupLeaderstats would create a second
+-- Folder, etc. Cleared in PlayerRemoving so a rejoin in the same
+-- session re-runs init normally.
+local processed: { [number]: boolean } = {}
+
 local function processPlayer(player: Player)
+	if processed[player.UserId] then return end
+	processed[player.UserId] = true
+
 	print(`[Server] {player.Name} joined`)
 
 	-- Load persistent data
@@ -202,6 +215,7 @@ Players.PlayerRemoving:Connect(function(player: Player)
 	DataManager.unloadPlayer(player)
 	CombatManager.removePlayer(player)
 	RoundManager.removePlayerScore(player)
+	processed[player.UserId] = nil
 end)
 
 -- ================================

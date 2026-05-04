@@ -25,7 +25,13 @@ local function ensureGui()
 	screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "SafeZoneIndicator"
 	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
+	-- IgnoreGuiInset = false matches HUD + WaveTracker. On systems with
+	-- the Roblox top status bar (~36px), having one pill ignore the inset
+	-- and the others not made them collide visually for a Lair-stayer
+	-- mid-round (HUD round-timer + WaveTracker pill + this safe-zone
+	-- pill all wanted top-center). With the inset respected, this pill
+	-- lands below the status bar like the other top-center elements.
+	screenGui.IgnoreGuiInset = false
 	screenGui.DisplayOrder = 7 -- above HUD round-timer (which sits at 5-6 zone)
 	screenGui.Enabled = false
 	screenGui.Parent = playerGui
