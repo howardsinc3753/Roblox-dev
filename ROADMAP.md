@@ -158,7 +158,24 @@ The foundation. Without this nothing else works.
 
 - `GetPlayerData` race fix (welcome banner / streak badge) — peer Claude domain
 - Blazing fire asset `10383034781` — placement TBD (castle apex? Lair torches?)
-- ~16 commits stacked locally on `main`, NOT pushed to origin
+- ~18 commits stacked locally on `main`, NOT pushed to origin
+
+### Big design ideas raised but not yet built (~half-day each)
+
+**Castle-as-Lair**: replace the programmatic Lair geometry with the floating
+castle asset `108721507426018` so the Lair IS the castle. Practice dummies,
+upgrade obelisk, shop obelisk, portal all reposition around/inside the castle.
+Arena loses its centerpiece — would need a different asset there.
+
+**Humanoid-in-Lair, Dragon-in-Arena**: in the Lair, player is a default
+Roblox humanoid (walk with WASD, default camera, click obelisks to interact).
+On portal-step, transform into the selected dragon for Arena combat. Reverse
+on Arena→Lair. Touches: zone detection, character model swap, camera
+switching, input handler switching, stat persistence across transition.
+
+Lair calm music: `83298024686703` (Rainy Window) shipped for both zones in
+commit `29398c1`. Future work: zone-aware switching with combat music in
+Arena (needs ZoneManager Part C).
 
 ### Next concrete sprint actions
 
