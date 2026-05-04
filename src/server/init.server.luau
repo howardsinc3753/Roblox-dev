@@ -19,6 +19,7 @@ local ArenaBuilder = require(script.ArenaBuilder)
 local NPCManager = require(script.NPCManager)
 local RateLimiter = require(script.RateLimiter)
 local LairBuilder = require(script.LairBuilder)
+local ZoneManager = require(script.ZoneManager)
 local CollectionService = game:GetService("CollectionService")
 
 -- Disable Roblox's default character auto-spawn. Without this, Roblox
@@ -59,11 +60,16 @@ local function teleportToLair(player: Player)
 end
 
 -- Build the arena (combat zone) and lair (safe hub) at server start.
--- Both static, so no per-player cost. Sprint 5 Part C adds zone detection
--- (which players are in which area), Part D wires combat to respect the
--- Lair as a safe space, Part E adds the portal teleport between them.
+-- Both static, so no per-player cost. Sprint 5 Parts C+D now live: ZoneManager
+-- tracks who's in the Lair vs Arena and CombatManager/NPCManager honor the
+-- safe-zone rule. Part E adds the portal teleport between them.
 ArenaBuilder.build()
 LairBuilder.build()
+
+-- Sprint 5 Part C: start the per-player Zone attribute updater. After this,
+-- Player:GetAttribute("Zone") is "Lair" or "Arena" and stays current at 5Hz.
+-- Combat code calls ZoneManager.isPlayerInLair() directly for real-time tests.
+ZoneManager.startTracking()
 
 -- Helper to get a remote
 local function getRemote(name: string): RemoteEvent
@@ -243,6 +249,12 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
 	if not CombatManager.canFireBreath(player) then return end
 	if not RoundManager.isActive() then return end
+	-- Sprint 5 Part D: no PvP / NPC combat from the Lair. Early return BEFORE
+	-- recordBreath so the cooldown isn't burned — kid can save their breath
+	-- for when they portal into the Arena. CombatManager helpers also gate
+	-- defensively, so even if this check were removed the Lair-target rule
+	-- still holds.
+	if ZoneManager.isPlayerInLair(player) then return end
 
 	CombatManager.recordBreath(player)
 
@@ -366,6 +378,11 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 	if not RateLimiter.check(player, "UseSpecial", 2) then return end
 	if not CombatManager.canUseSpecial(player) then return end
 	if not RoundManager.isActive() then return end
+	-- Sprint 5 Part D: specials are combat tools — disabled in the Lair. We
+	-- gate ALL elements (even buff-only specials like Earth armor or Light
+	-- heal) so the rule reads cleanly to kids: "the Lair is a safe zone, your
+	-- combat keys do nothing here." Cooldown intentionally not burned.
+	if ZoneManager.isPlayerInLair(player) then return end
 
 	CombatManager.recordSpecial(player)
 	local state = CombatManager.getState(player)
@@ -526,6 +543,11 @@ useShieldRemote.OnServerEvent:Connect(function(player: Player)
 	if not RateLimiter.check(player, "UseShield", 2) then return end
 	if not CombatManager.canUseShield(player) then return end
 	if not RoundManager.isActive() then return end
+	-- Sprint 5 Part D: same "no combat in Lair" rule. Shield is technically
+	-- defensive but it's still a combat tool, and there's nothing to defend
+	-- against in the safe zone. Cooldown not burned so the kid keeps it for
+	-- the Arena fight ahead.
+	if ZoneManager.isPlayerInLair(player) then return end
 
 	local ok = CombatManager.useShield(player)
 	if not ok then return end

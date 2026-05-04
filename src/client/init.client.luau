@@ -31,6 +31,7 @@ local WelcomeBanner = require(script.WelcomeBanner)
 local MobileControls = require(script.MobileControls)
 local ControlsOverlay = require(script.ControlsOverlay)
 local TipManager = require(script.TipManager)
+local SafeZoneIndicator = require(script.SafeZoneIndicator)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -47,6 +48,9 @@ Awareness.create()
 WelcomeBanner.create()
 -- Touch UI for mobile (iPad/iPhone/Android). No-op on keyboard devices.
 MobileControls.init()
+-- Sprint 5 Part C/D: "🏠 SAFE ZONE" pill while Player.Zone == Lair.
+-- Reads ZoneManager's per-player attribute; no remote subscription needed.
+SafeZoneIndicator.init()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
@@ -747,14 +751,13 @@ RunService.Heartbeat:Connect(function(dt: number)
 	-- moved out of cone/range. Cheap (~no-op when no lock is active).
 	LockOnController.update()
 
-	-- Zone-based music crossfade. Lair sits at Y=500; Arena around Y=50.
-	-- Y > 300 = in Lair. Crude altitude check is enough until ZoneManager
-	-- (Sprint 5 Part C) lands and can be the canonical zone source.
-	local character = player.Character
-	if character and character.PrimaryPart then
-		local inLair = character.PrimaryPart.Position.Y > 300
-		SoundManager.setZone(inLair, dt)
-	end
+	-- Zone-based music crossfade. ZoneManager (Sprint 5 Part C) is now the
+	-- canonical source — replaces the previous Y>300 altitude heuristic.
+	-- Default to Lair if the attribute hasn't replicated yet (matches the
+	-- spawn-in-Lair behavior so the calm music plays first).
+	local zoneAttr = player:GetAttribute("Zone")
+	local inLair = zoneAttr == nil or zoneAttr == "Lair"
+	SoundManager.setZone(inLair, dt)
 end)
 
 -- Hotkey handler. Tab is reserved by Roblox for the playerlist UI, so

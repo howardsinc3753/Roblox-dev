@@ -48,8 +48,9 @@ init.server.luau  (entry — RUNS FIRST, errors here = total breakage)
 ├── DragonSpawner.luau        ← character creation, mesh attach via Motor6D
 │   └── DragonConfig (shared)
 ├── ArenaBuilder.luau         ← floating-island geometry
-├── LairBuilder.luau          ← Crystal Lair (Sprint 5, NOT YET WIRED IN)
-├── NPCManager.luau           ← AI dragons, waves, lock-on warnings
+├── LairBuilder.luau          ← Crystal Lair (Sprint 5)
+├── ZoneManager.luau          ← Sprint 5 Part C: Lair sphere test + Player.Zone attribute
+├── NPCManager.luau           ← AI dragons, waves, lock-on warnings (skips Lair players)
 │   └── EnemyConfig (shared)
 └── RateLimiter.luau          ← per-player remote spam prevention
 ```
@@ -71,7 +72,8 @@ init.client.luau (entry — depends on remotes existing!)
 ├── LockOnController.luau     ← F-key target acquisition + Highlight reticle
 ├── Awareness.luau            ← compass arrows + damage direction arc
 ├── WelcomeBanner.luau        ← daily login welcome popup
-└── MobileControls.luau       ← touch joystick + buttons (only on mobile)
+├── MobileControls.luau       ← touch joystick + buttons (only on mobile)
+└── SafeZoneIndicator.luau    ← Sprint 5 Part C: "SAFE ZONE" pill, attribute-driven
 ```
 
 ### Shared (`src/shared/`)

@@ -149,10 +149,11 @@ The foundation. Without this nothing else works.
 | B | Sky Kingdom Arena (towers, clouds, castle) | ✅ shipped |
 | Hero assets | Wired guard tower, wizard tower, crystal tower, obelisks, sky castle, atmosphere, grass base | ✅ shipped |
 | Lair grounding | Underbase + tapered bottom + ambient clouds | ✅ shipped |
-| C | ZoneManager (Region3 zone detection) | ⏳ NOT STARTED — currently spatial separation handles safety accidentally |
-| D | Combat-zone gating (NPCs ignore Lair, PvP gated) | ⏳ NOT STARTED |
+| C | ZoneManager (sphere-based Lair test, `Player:GetAttribute("Zone")` 5Hz tick) | ✅ shipped |
+| D | Combat-zone gating (NPCs ignore Lair, PvP gated, breath/special/shield no-op in Lair) | ✅ shipped |
 | E | Portal teleport (both directions) | ✅ shipped |
 | F | Spawn in Lair (default + post-death) | ✅ shipped (after recursion-bug hotfix `d58d1e3`) |
+| UI | "🏠 SAFE ZONE" pill while in Lair (top-center pill, attribute-driven) | ✅ shipped |
 
 ### Outstanding bugs / cleanup
 
@@ -179,9 +180,13 @@ Arena (needs ZoneManager Part C).
 
 ### Next concrete sprint actions
 
-1. **QA the current loop**: F5, spawn in Lair, walk through portal, fight, return portal, die, respawn in Lair. Confirm all four steps work.
-2. **Sprint 5 Parts C+D**: explicit zone enforcement. Currently the Lair is "safe by accident" because NPCs can't reach it spatially, but explicit gating is more robust.
-3. **After C+D**: push the entire Sprint 5 stack, then move to Sprint 6 (wave rest structure) or Sprint 7 (dragon progression UI in Lair) — whichever the QA playtest reveals as more urgent.
+1. **QA the Lair safe zone**: F5 in Studio, spawn in Lair, confirm:
+   - "🏠 SAFE ZONE" pill visible top-center while standing in the Lair
+   - LMB/Special/Shield keys do nothing in the Lair (no cooldown burned)
+   - Portal to Arena → pill disappears, combat works
+   - Return portal → pill reappears, combat goes back to no-op
+   - NPC at the edge of Arena does NOT chase a player who hovers near the Lair-Arena boundary on the Lair side
+2. **Move to Sprint 6** (wave rest structure) or **Sprint 7** (dragon progression UI in Lair) — whichever the QA playtest reveals as more urgent. Sprint 5 closes after the QA above passes.
 
 ---
 

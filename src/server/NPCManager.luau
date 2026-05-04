@@ -23,6 +23,7 @@ local CollectionService = game:GetService("CollectionService")
 local RunService = game:GetService("RunService")
 
 local EnemyConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("EnemyConfig"))
+local ZoneManager = require(script.Parent.ZoneManager)
 
 local NPCManager = {}
 
@@ -453,16 +454,22 @@ function NPCManager.applyDamage(npcId: number, damage: number, killerUserId: num
 end
 
 -- Find the nearest alive player within `range` of `pos`. Returns nil if none.
+-- Sprint 5 Part D: Lair players are invisible to NPC AI. They're in the safe
+-- zone, so they shouldn't get acquired as a target even if technically within
+-- detection range (could happen if a Lair-edge wanderer scrapes the radius
+-- of a high-altitude Boss).
 local function findNearestPlayer(pos: Vector3, range: number): Player?
 	local best: Player? = nil
 	local bestDist = range
 	for _, plr in Players:GetPlayers() do
 		local char = plr.Character
 		if char and char.PrimaryPart then
-			local dist = (char.PrimaryPart.Position - pos).Magnitude
-			if dist < bestDist then
-				bestDist = dist
-				best = plr
+			if not ZoneManager.isPlayerInLair(plr) then
+				local dist = (char.PrimaryPart.Position - pos).Magnitude
+				if dist < bestDist then
+					bestDist = dist
+					best = plr
+				end
 			end
 		end
 	end
@@ -488,12 +495,17 @@ local function tickAI(damageCallback: (target: Player, damage: number, source: V
 		-- Re-acquire target every tick so they switch to closer players when relevant.
 		-- Aggro persistence is preserved: if current target still in detection range,
 		-- keep them; otherwise look for a new one.
+		-- Sprint 5 Part D: also drop the target if they portal into the Lair
+		-- mid-chase (the safe zone breaks aggro the moment they cross over).
 		local currentTarget: Player? = nil
 		if state.targetUserId then
 			currentTarget = Players:GetPlayerByUserId(state.targetUserId)
 			if currentTarget and currentTarget.Character and currentTarget.Character.PrimaryPart then
 				local dist = (currentTarget.Character.PrimaryPart.Position - pos).Magnitude
 				if dist > enemy.detectionRange * 1.5 then -- 50% leash extension before drop
+					currentTarget = nil
+					state.targetUserId = nil
+				elseif ZoneManager.isPlayerInLair(currentTarget) then
 					currentTarget = nil
 					state.targetUserId = nil
 				end

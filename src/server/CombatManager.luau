@@ -6,6 +6,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+local ZoneManager = require(script.Parent.ZoneManager)
 
 local CombatManager = {}
 
@@ -161,6 +162,15 @@ function CombatManager.applyDamage(target: Player, damage: number): (boolean, nu
 		return false, 0
 	end
 
+	-- Sprint 5 Part D: Lair is invulnerable. Defense-in-depth — even though
+	-- the hit-detection helpers below filter Lair players out before they
+	-- reach this point, a future code path (NPC suicide hit, AoE explosion,
+	-- a new ability) might call applyDamage directly. Refuse here too so the
+	-- safe-zone rule holds regardless of how damage is routed.
+	if ZoneManager.isPlayerInLair(target) then
+		return false, 0
+	end
+
 	-- Shield check: scale incoming damage if the bubble is still up
 	if tick() < state.shieldActiveUntil then
 		damage = math.floor(damage * (1 - SHIELD_DAMAGE_REDUCTION) + 0.5)
@@ -257,10 +267,16 @@ function CombatManager.getHealth(player: Player): (number, number)
 	return 0, 0
 end
 
--- Cone-based hit detection for breath attacks
+-- Cone-based hit detection for breath attacks.
+-- Sprint 5 Part D: silently no-ops if shooter is in the Lair (PvP gated in
+-- safe zone) and skips any potential target who is in the Lair (sanctuary).
 function CombatManager.findHitPlayer(shooter: Player, origin: Vector3, direction: Vector3): Player?
 	local shooterState = playerStates[shooter.UserId]
 	if not shooterState then
+		return nil
+	end
+	-- Lair shooter: PvP disabled in the safe zone.
+	if ZoneManager.isPlayerInLair(shooter) then
 		return nil
 	end
 
@@ -271,17 +287,21 @@ function CombatManager.findHitPlayer(shooter: Player, origin: Vector3, direction
 		if otherPlayer ~= shooter then
 			local otherState = playerStates[otherPlayer.UserId]
 			if otherState and otherState.alive then
-				local character = otherPlayer.Character
-				if character then
-					local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
-					if rootPart then
-						local toTarget = rootPart.Position - origin
-						local dist = toTarget.Magnitude
-						if dist < closestDist then
-							local dot = toTarget.Unit:Dot(direction.Unit)
-							if dot > 0.85 then -- ~30 degree cone
-								closestDist = dist
-								closestPlayer = otherPlayer
+				-- Lair target: refuse to engage. Even if the cone math says yes,
+				-- the safe-zone rule trumps it.
+				if not ZoneManager.isPlayerInLair(otherPlayer) then
+					local character = otherPlayer.Character
+					if character then
+						local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+						if rootPart then
+							local toTarget = rootPart.Position - origin
+							local dist = toTarget.Magnitude
+							if dist < closestDist then
+								local dot = toTarget.Unit:Dot(direction.Unit)
+								if dot > 0.85 then -- ~30 degree cone
+									closestDist = dist
+									closestPlayer = otherPlayer
+								end
 							end
 						end
 					end
@@ -324,19 +344,27 @@ end
 function CombatManager.findPlayersInCone(origin: Vector3, direction: Vector3, range: number, dotThreshold: number, exclude: Player?): { Player }
 	local result: { Player } = {}
 	if direction.Magnitude < 0.001 then return result end
+	-- Sprint 5 Part D: caster-in-Lair = no PvP. Same rule as findHitPlayer
+	-- but using exclude (the caster) since cone-damage specials pass it.
+	if exclude and ZoneManager.isPlayerInLair(exclude) then
+		return result
+	end
 	local dirUnit = direction.Unit
 	for _, otherPlayer in Players:GetPlayers() do
 		if otherPlayer ~= exclude then
 			local otherState = playerStates[otherPlayer.UserId]
 			if otherState and otherState.alive then
-				local character = otherPlayer.Character
-				if character and character.PrimaryPart then
-					local toTarget = character.PrimaryPart.Position - origin
-					local dist = toTarget.Magnitude
-					if dist > 0 and dist <= range then
-						local dot = toTarget.Unit:Dot(dirUnit)
-						if dot >= dotThreshold then
-							table.insert(result, otherPlayer)
+				-- Sanctuary check: skip targets in the Lair regardless of geometry.
+				if not ZoneManager.isPlayerInLair(otherPlayer) then
+					local character = otherPlayer.Character
+					if character and character.PrimaryPart then
+						local toTarget = character.PrimaryPart.Position - origin
+						local dist = toTarget.Magnitude
+						if dist > 0 and dist <= range then
+							local dot = toTarget.Unit:Dot(dirUnit)
+							if dot >= dotThreshold then
+								table.insert(result, otherPlayer)
+							end
 						end
 					end
 				end
