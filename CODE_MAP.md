@@ -76,7 +76,8 @@ init.client.luau (entry — depends on remotes existing!)
 ├── MobileControls.luau       ← touch joystick + buttons (only on mobile)
 ├── SafeZoneIndicator.luau    ← Sprint 5 Part C: "SAFE ZONE" pill, attribute-driven
 ├── WaveTracker.luau          ← Sprint 6: wave-state HUD (incoming / counter / clear / rest)
-└── DragonUpgradeUI.luau      ← Sprint 7: stat-upgrade modal (multi-dragon tabs, preview, confirm)
+├── DragonUpgradeUI.luau      ← Sprint 7: stat-upgrade modal (multi-dragon tabs, preview, confirm)
+└── LairAtmosphere.luau       ← Sprint 8: Lighting-tint crossfade on Lair / Arena zone change
 ```
 
 ### Shared (`src/shared/`)

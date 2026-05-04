@@ -232,6 +232,48 @@ Audit findings deferred (revisit post-QA):
 - #14 Mastery cross-dragon scaling (wait for playtest data on rebuild pain)
 - #17 deepMerge migration manual verification with a real pre-Sprint-7 save
 
+### Sprint 8 — Lair Glow-up (~4 hours) ✅ shipped
+
+Use case: Sprint 7 made the Lair MEANINGFUL (Stat Stone, dummies,
+upgrade modal) but it still read as static decoration. Kids spend
+30s+ per round in the Lair plus full intermissions; a static
+environment burns boredom into all that hub time. Goal: Lair becomes
+a destination kids LOOK FORWARD to returning to.
+
+Shipped in 5 incremental commits so each visual layer can be
+reviewed and reverted independently:
+
+- ✅ **Central Crystal Tower glow-up** — continuous slow Y-rotation,
+  color-cycling apex PointLight (Fire→Ice→Lightning→Earth→Dark→Light
+  loop on 18-second cycle), vertical 100-stud pillar-of-light beam,
+  rising-sparkle particle aura at base.
+- ✅ **Ambient floating motes** — 30 small Neon spheres drifting
+  through the Lair air with random-walk paths + independent fade
+  cycles. Element-color rotation. Fills the empty volume between
+  pillar and arches.
+- ✅ **Element arches polish** — pulsing PointLights inside each of the
+  6 arch crystals (each on a 0.5s phase offset so they form an
+  organic chorus), themed ground glow disc under each arch, walk-
+  through particle bursts when player stands on the disc (per-player
+  2-second cooldown so loitering doesn't spam particles).
+- ✅ **`LairAtmosphere.luau` client module** — crossfades global
+  Lighting (Ambient / OutdoorAmbient / FogColor / FogEnd) toward
+  purple-gold magical-realm tint when in the Lair, restores Studio
+  baseline when in the Arena. Crossfade matches music transition pace.
+- ✅ **Stat Stone ground rune circle** — concentric pulsing rings +
+  counter-rotating glyph slab around the obelisk. Visible across the
+  Lair as a "magical interaction point."
+- ✅ **Practice dummy element variety** — three dummies are now Fire /
+  Ice / Lightning themed with colored bodies + floating accent orbs +
+  element-themed particle wisps + element-named billboards. Sets up
+  future damage-type mechanics; cosmetic for now.
+
+Tier 3 deferred:
+- Custom Lair skybox swap (heavy art, needs Roblox asset)
+- Background ambient sound layer (chimes, wind hum)
+- Dragon idle animations (more wing-flap variation when not moving)
+- Portal arrival flash effect (would need a new remote)
+
 ### Sprint 8 — First-time Tutorial (~4-5 hours)
 - Detect first-ever join (`data.totalLogins == 1` — peer Claude already tracks this)
 - Quest-style nudges: "Try breath attack on the dummy" → "Step through the portal"
