@@ -21,6 +21,15 @@ local RateLimiter = require(script.RateLimiter)
 local LairBuilder = require(script.LairBuilder)
 local CollectionService = game:GetService("CollectionService")
 
+-- Disable Roblox's default character auto-spawn. Without this, Roblox
+-- spawns a default humanoid before our PlayerAdded handler runs — user
+-- sees the default character first, then our DragonSpawner's dragon
+-- replaces it. The intermediate default-spawn position (often a Roblox
+-- SpawnLocation at origin) showed before round start, then the round
+-- start respawn put them in the Lair. This makes our spawn pipeline
+-- the single source of truth.
+Players.CharacterAutoLoads = false
+
 print("[Server] Dragon Warz server starting...")
 
 -- Sprint 5 Part F: all spawns default to the Lair (safe zone). The Arena

@@ -115,7 +115,10 @@ end
 -- To swap: pick another Audio asset from create.roblox.com/store and replace
 -- the ID below. Verify the creator is trusted (Distrokid, official Roblox
 -- audio, or your own uploads) — random user uploads often get moderated away.
-local BACKGROUND_MUSIC_ID = "rbxassetid://137677840690864"
+-- Calm "Rainy Window" track. User picked this as the Lair atmosphere —
+-- peaceful, not battle-intense. Future: zone-aware switching between this
+-- and combat music when player crosses Arena/Lair boundary.
+local BACKGROUND_MUSIC_ID = "rbxassetid://83298024686703"
 local BACKGROUND_MUSIC_VOLUME = 0.25
 
 local backgroundMusic: Sound? = nil
