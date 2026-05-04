@@ -105,6 +105,25 @@ function FlightController.disable()
 	enabled = false
 end
 
+-- Sprint 7: explicitly snap the dragon to zero velocity. Just disabling
+-- the Heartbeat loop leaves the LinearVelocity constraint at whatever
+-- VectorVelocity it had last frame — so a kid moving forward when they
+-- opened the upgrade modal keeps drifting forward indefinitely while
+-- the modal is open. halt() also zeros the smoothed-velocity cache so
+-- mesh wobble stops as if the dragon parked itself. Caller's
+-- responsibility to call enable() afterward when input should resume.
+function FlightController.halt()
+	local character = player.Character
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart") :: BasePart?
+	if not rootPart then return end
+	local linearVelocity = rootPart:FindFirstChild("FlightVelocity") :: LinearVelocity?
+	if linearVelocity then
+		linearVelocity.VectorVelocity = Vector3.zero
+	end
+	smoothedVelocity = Vector3.zero
+end
+
 function FlightController.getBoostPercent(): number
 	return boostMeter / BOOST_MAX
 end

@@ -24,8 +24,21 @@
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 
 local DragonConfig = require(ReplicatedStorage.Shared.Modules:WaitForChild("DragonConfig"))
+-- Sibling client modules — required to suspend gameplay input while the
+-- modal is open. Without these the camera kept rotating with mouse
+-- movement (because UserInputService.MouseBehavior=Default still fires
+-- InputChanged for MouseMovement) and flight controls stayed hot, so a
+-- kid trying to click an upgrade button was simultaneously yawing their
+-- dragon and accidentally firing breath. POST-PLAYTEST: kid reported
+-- "my mouse still controls me looking around, can't interface with the
+-- menu" — this fixes it.
+local FlightController = require(script.Parent.FlightController)
+local CameraController = require(script.Parent.CameraController)
+local CombatInput = require(script.Parent.CombatInput)
+local SoundManager = require(script.Parent.SoundManager)
 
 local DragonUpgradeUI = {}
 
@@ -587,6 +600,44 @@ function DragonUpgradeUI.open()
 	rebuild()
 	screenGui.Enabled = true
 
+	-- POST-PLAYTEST FIX: suspend gameplay input while the modal is open.
+	-- Three things to handle:
+	--   1. Mouse: free the cursor so the kid can click upgrade buttons.
+	--   2. Camera: stop reading mouse delta so cursor movement doesn't
+	--      yaw the dragon while they're trying to aim at a button.
+	--   3. Flight + Combat: WASD/Space/LMB/RMB shouldn't move the dragon
+	--      or fire breath through the modal.
+	-- All restored on close. Trust round-state events (RoundStart /
+	-- RoundEnd / death) to override our restoration if the round
+	-- transitioned while the modal was open — those handlers are
+	-- idempotent.
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	CameraController.disable()
+	FlightController.disable()
+	-- halt() zeros velocity in addition to gating input — without this
+	-- the dragon keeps drifting in the last commanded direction the whole
+	-- time the modal is open (LinearVelocity constraint persists).
+	FlightController.halt()
+	CombatInput.disable()
+
+	-- Gamepad navigation (Xbox playtest target): set a sensible default
+	-- selection so D-pad works immediately. Picks the first stat row's
+	-- upgrade button; falls back gracefully if nothing's clickable.
+	-- Uses the module-level `statsContainer` ref directly (the Frames
+	-- intentionally don't have Names set, so a recursive find wouldn't
+	-- work).
+	if statsContainer then
+		for _, row in statsContainer:GetChildren() do
+			if row:IsA("Frame") then
+				local btn = row:FindFirstChildWhichIsA("TextButton")
+				if btn and btn.Active then
+					GuiService.SelectedObject = btn
+					break
+				end
+			end
+		end
+	end
+
 	-- First-visit tutorial hint (peer #15). Tracks both client-session-flag
 	-- and server PlayerData.hasSeenLairTutorial. Either being true skips
 	-- the hint. Server flip happens via the MarkLairTutorialSeen remote
@@ -606,6 +657,16 @@ end
 function DragonUpgradeUI.close()
 	if screenGui then screenGui.Enabled = false end
 	if confirmOverlay then confirmOverlay.Visible = false end
+
+	-- Restore gameplay input. See open() for why we disabled them.
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	CameraController.enable()
+	FlightController.enable()
+	CombatInput.enable()
+
+	-- Release the gamepad selection so the D-pad doesn't keep navigating
+	-- a now-hidden modal.
+	GuiService.SelectedObject = nil
 end
 
 function DragonUpgradeUI.isOpen(): boolean
@@ -683,12 +744,14 @@ function DragonUpgradeUI.init()
 		end)
 	end
 
-	-- Esc to close (when open). UserInputService is gameProcessed-aware so
-	-- we don't fight TextBox focus or other modals.
+	-- Esc / Xbox B to close (when open). UserInputService is gameProcessed-
+	-- aware so we don't fight TextBox focus or other modals. ButtonB is
+	-- the standard Xbox "back" gesture so kids transferring from the PC
+	-- demo to console don't have to relearn the close path.
 	UserInputService.InputBegan:Connect(function(input: InputObject, gameProcessed: boolean)
 		if gameProcessed then return end
 		if not DragonUpgradeUI.isOpen() then return end
-		if input.KeyCode == Enum.KeyCode.Escape then
+		if input.KeyCode == Enum.KeyCode.Escape or input.KeyCode == Enum.KeyCode.ButtonB then
 			DragonUpgradeUI.close()
 		end
 	end)
