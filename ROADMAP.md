@@ -133,6 +133,27 @@ beats and kids feel structured progress.
   canonical round-progress UI; the safety-cap clock isn't surfaced to
   avoid misleading the kid with a 240s number.
 
+**Sprint 6 playtest fixes (post-first-playtest):**
+- ✅ **Server-boot ghost-player bug** — `Players.PlayerAdded:Connect`
+  ran AFTER the slow `ArenaBuilder.build()` + `LairBuilder.build()`
+  InsertService loads. The player whose join triggered server boot
+  fired PlayerAdded before the handler attached, became a ghost (no
+  leaderstats, no DataManager entry, no `state.scores` row, no spawn).
+  At round-end: "No Winner", empty leaderboard, 0 coins. Fixed by
+  factoring the handler into `processPlayer` and adding a catch-up
+  loop that `task.spawn`s `processPlayer` for any pre-attached players.
+- ✅ **15-second purple-screen wait on first join** — RoundManager's
+  startLoop began with a 15s intermission unconditionally, so the kid
+  triggering server boot stared at nothing for 15s before round 1.
+  First iteration now skips the intermission; subsequent intermissions
+  still run (they're when DragonSelectUI opens between rounds).
+- ✅ **WaveTracker pill overlapping HUD "Round N" text** — HUD's
+  ScreenGui doesn't set `IgnoreGuiInset` (default false, content offset
+  by Roblox's top status bar) but WaveTracker had `IgnoreGuiInset =
+  true`. On systems with the status bar showing, the two pills crashed
+  into each other. Now both respect the inset and there's a clean 20px
+  gap between them.
+
 **Sprint 6 audit follow-ups (post-review):**
 - ✅ Closure-captured `spawnedCount` / `spawnDone` in `runWaveSequence`.
   Fixes: counter going UP after a kill during the spawn-stagger window,

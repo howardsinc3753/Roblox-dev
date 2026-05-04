@@ -151,7 +151,17 @@ local function refreshLeaderstats(player: Player)
 	end
 end
 
-Players.PlayerAdded:Connect(function(player: Player)
+-- Sprint 6 playtest fix: was a single inline PlayerAdded handler, now
+-- factored into a function + catch-up loop. The bug it fixes: server
+-- boot is triggered by the first player joining, but ArenaBuilder.build()
+-- and LairBuilder.build() yield on InsertService:LoadAsset for several
+-- seconds. By the time PlayerAdded:Connect runs at this line, the firing
+-- player joined event has ALREADY been raised — and Roblox doesn't replay
+-- it. Result: the boot-trigger player became a ghost (no leaderstats,
+-- no DataManager entry, no spawn, no state.scores entry). End-of-round
+-- showed "No Winner" / empty leaderboard / 0 coins because the only
+-- player had no score record.
+local function processPlayer(player: Player)
 	print(`[Server] {player.Name} joined`)
 
 	-- Load persistent data
@@ -175,7 +185,17 @@ Players.PlayerAdded:Connect(function(player: Player)
 	-- Send initial data to client (coins now include the daily bonus)
 	updateCoinsRemote:FireClient(player, data.coins)
 	spawnDragonRemote:FireClient(player, dragonId)
-end)
+end
+
+Players.PlayerAdded:Connect(processPlayer)
+-- Catch any players who joined during the slow build phase. Players
+-- already in Players:GetPlayers() won't have triggered the handler we
+-- just connected — process them explicitly. task.spawn so we don't
+-- block this chunk of init on the (rare) case where multiple players
+-- joined very quickly.
+for _, player in Players:GetPlayers() do
+	task.spawn(processPlayer, player)
+end
 
 Players.PlayerRemoving:Connect(function(player: Player)
 	print(`[Server] {player.Name} leaving`)

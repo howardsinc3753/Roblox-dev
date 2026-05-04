@@ -46,17 +46,26 @@ local function ensureGui()
 	screenGui = Instance.new("ScreenGui")
 	screenGui.Name = "WaveTracker"
 	screenGui.ResetOnSpawn = false
-	screenGui.IgnoreGuiInset = true
+	-- IgnoreGuiInset = false matches HUD's behavior (HUD doesn't set it,
+	-- so default false). On systems with the Roblox top status bar
+	-- (~36px), having one pill ignore the inset and the other not caused
+	-- them to overlap visually. With both respecting the inset, the
+	-- 20-pixel gap between y=10-60 (HUD) and y=80-140 (us) is preserved
+	-- everywhere.
+	screenGui.IgnoreGuiInset = false
 	screenGui.DisplayOrder = 8 -- above HUD round-timer, below modal panels (DragonSelect=10)
 	screenGui.Enabled = false
 	screenGui.Parent = playerGui
 
-	-- Main panel: positioned top-center under the round timer area.
+	-- Main panel: positioned top-center under the HUD round-timer area.
+	-- HUD round-timer sits at y=10-60; pre-Sprint-6 we put this at y=70
+	-- with no margin and the two visually crowded each other. Now y=80
+	-- with a 20px gap between them so they read as separate elements.
 	-- All states show their text in mainBanner inside this panel.
 	mainPanel = Instance.new("Frame")
 	mainPanel.Name = "Panel"
 	mainPanel.Size = UDim2.fromOffset(420, 60)
-	mainPanel.Position = UDim2.new(0.5, -210, 0, 70)
+	mainPanel.Position = UDim2.new(0.5, -210, 0, 80)
 	mainPanel.BackgroundColor3 = Color3.fromRGB(20, 20, 30)
 	mainPanel.BackgroundTransparency = 0.2
 	mainPanel.BorderSizePixel = 0
@@ -89,7 +98,7 @@ local function ensureGui()
 	subtitle = Instance.new("TextLabel")
 	subtitle.Name = "Subtitle"
 	subtitle.Size = UDim2.fromOffset(420, 28)
-	subtitle.Position = UDim2.new(0.5, -210, 0, 138)
+	subtitle.Position = UDim2.new(0.5, -210, 0, 148)
 	subtitle.BackgroundTransparency = 1
 	subtitle.Text = ""
 	subtitle.TextColor3 = Color3.fromRGB(255, 230, 100)

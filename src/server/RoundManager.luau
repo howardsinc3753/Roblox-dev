@@ -140,17 +140,39 @@ end
 -- Main round loop (runs in a spawned thread)
 function RoundManager.startLoop()
 	task.spawn(function()
+		-- Sprint 6 playtest fix: skip the 15-second intermission on the
+		-- very first round. Kids triggering server boot were staring at
+		-- the Lair (or worse, Roblox's join screen) for 15s with no
+		-- feedback — felt frozen. Subsequent intermissions still run
+		-- because that window is when Dragon Select opens for switching
+		-- between rounds. The wave-INCOMING telegraph (3s) is enough
+		-- "get ready" beat for the first round.
+		local isFirstIteration = true
+
 		while true do
 			-- Intermission
 			state.active = false
-			print(`[RoundManager] Intermission ({INTERMISSION_DURATION}s)`)
-			task.wait(INTERMISSION_DURATION)
-
-			-- Check minimum players
-			if #Players:GetPlayers() < 1 then
-				print("[RoundManager] Not enough players, waiting...")
+			if isFirstIteration then
+				isFirstIteration = false
+				-- Still wait for at least one player. The catch-up loop in
+				-- init.server.luau will have processed any boot-time joiners,
+				-- so this is fast in practice.
 				while #Players:GetPlayers() < 1 do
-					task.wait(2)
+					task.wait(0.5)
+				end
+				-- Brief pause so the player's character has time to spawn
+				-- before the round starts firing remotes at it.
+				task.wait(1)
+			else
+				print(`[RoundManager] Intermission ({INTERMISSION_DURATION}s)`)
+				task.wait(INTERMISSION_DURATION)
+
+				-- Check minimum players
+				if #Players:GetPlayers() < 1 then
+					print("[RoundManager] Not enough players, waiting...")
+					while #Players:GetPlayers() < 1 do
+						task.wait(2)
+					end
 				end
 			end
 
