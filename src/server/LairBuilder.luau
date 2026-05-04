@@ -901,6 +901,89 @@ local function buildPortalToArena(parent: Instance): Part
 	return portal
 end
 
+-- Sprint 8: ambient floating motes drifting through the Lair air. Pure
+-- visual ambience — kid spends 30s+ in the Lair per round and the empty
+-- air between the central pillar and the arches read as "static
+-- decoration" without these. Motes use:
+--   - Small Neon spheres (~1 stud) at random Y between floor and ~80
+--     above so they fill the volume kids fly through.
+--   - Element-color tints (Fire / Ice / Lightning / etc.) drawn from
+--     ELEMENT_CYCLE_COLORS so they match the central pillar's palette.
+--   - Slow random-walk drift via TweenService chain — each mote picks a
+--     new target every 4-6 seconds and tweens there. Cheap (no
+--     Heartbeat per-frame work).
+--   - Transparency cycle so they fade in and out, hiding the destination
+--     swaps and giving a "magical specks" feel rather than "jiggling
+--     billiard balls".
+local AMBIENT_MOTE_COUNT = 30
+local AMBIENT_MOTE_RADIUS = 110 -- horizontal scatter (slightly wider than FLOOR_RADIUS)
+
+local function buildAmbientMotes(parent: Instance)
+	local TweenService = game:GetService("TweenService")
+	for i = 1, AMBIENT_MOTE_COUNT do
+		local color = ELEMENT_CYCLE_COLORS[((i - 1) % #ELEMENT_CYCLE_COLORS) + 1]
+		local startAngle = math.random() * math.pi * 2
+		local startDist = math.random() * AMBIENT_MOTE_RADIUS
+		local startHeight = math.random(8, 70)
+		local mote = makePart(`AmbientMote_{i}`, parent, {
+			Shape = Enum.PartType.Ball,
+			Size = Vector3.new(1, 1, 1),
+			CFrame = CFrame.new(LAIR_CENTER + Vector3.new(
+				math.cos(startAngle) * startDist,
+				startHeight,
+				math.sin(startAngle) * startDist
+			)),
+			Color = color,
+			Material = Enum.Material.Neon,
+			Transparency = 0.3,
+			CanCollide = false,
+		})
+
+		-- Random-walk drift. Each mote runs its own tween chain on its own
+		-- coroutine so they don't all swing in lockstep. task.wait() with
+		-- a small jitter staggers their first tween starts so the swarm
+		-- feels organic.
+		task.delay(math.random() * 2, function()
+			while mote.Parent do
+				local angle = math.random() * math.pi * 2
+				local dist = math.random() * AMBIENT_MOTE_RADIUS
+				local height = math.random(8, 70)
+				local target = CFrame.new(LAIR_CENTER + Vector3.new(
+					math.cos(angle) * dist, height, math.sin(angle) * dist
+				))
+				local duration = 4 + math.random() * 2
+				local tween = TweenService:Create(mote,
+					TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ CFrame = target }
+				)
+				tween:Play()
+				tween.Completed:Wait()
+			end
+		end)
+
+		-- Transparency cycle so the mote fades in and out. Independent
+		-- tween chain (different period from drift so they desync naturally
+		-- and the swarm doesn't pulse as one).
+		task.delay(math.random() * 1.5, function()
+			while mote.Parent do
+				local fadeOut = TweenService:Create(mote,
+					TweenInfo.new(2.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ Transparency = 0.85 }
+				)
+				fadeOut:Play()
+				fadeOut.Completed:Wait()
+				if not mote.Parent then break end
+				local fadeIn = TweenService:Create(mote,
+					TweenInfo.new(2.5, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+					{ Transparency = 0.3 }
+				)
+				fadeIn:Play()
+				fadeIn.Completed:Wait()
+			end
+		end)
+	end
+end
+
 function LairBuilder.build()
 	local model = Instance.new("Model")
 	model.Name = "Lair"
@@ -913,6 +996,7 @@ function LairBuilder.build()
 	buildPracticeDummies(model)
 	buildInteractionStones(model)
 	buildPortalToArena(model)
+	buildAmbientMotes(model) -- Sprint 8 eye candy
 
 	print(`[LairBuilder] Crystal Lair built at {LAIR_CENTER}. {#spawnPoints} spawn points.`)
 end
