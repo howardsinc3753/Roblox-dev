@@ -646,26 +646,6 @@ export type WaveResult = {
 	isBossWave: boolean,
 }
 
--- Internal: spawn the NPCs for a wave. Each spawn checks isRoundActive
--- so a mid-spawn round-end doesn't waste InsertService calls.
-local function spawnWaveNPCs(waveDef: any, isRoundActive: () -> boolean)
-	for _ = 1, waveDef.scouts do
-		if not isRoundActive() then return end
-		NPCManager.spawn("Scout")
-		task.wait(0.3)
-	end
-	for _ = 1, waveDef.warriors do
-		if not isRoundActive() then return end
-		NPCManager.spawn("Warrior")
-		task.wait(0.5)
-	end
-	for _ = 1, waveDef.bosses do
-		if not isRoundActive() then return end
-		NPCManager.spawn("Boss")
-		task.wait(0.8)
-	end
-end
-
 -- Internal: count alive NPCs cheaply (no allocation). Used in the ACTIVE
 -- phase polling loop to decide when the wave is cleared.
 local function countAliveNPCs(): number
@@ -708,9 +688,55 @@ function NPCManager.runWaveSequence(
 		-- and broadcast the initial enemy count. The ACTIVE loop polls every
 		-- WAVE_TICK_RATE seconds and re-broadcasts so the client counter ticks
 		-- down without needing per-kill remotes.
+		--
+		-- Closure-captured state lets the broadcast count "remaining to kill"
+		-- correctly during the spawn-stagger window. Without this, the kid
+		-- would see counter weirdness: spawn 1 → "1 / 5" → kill it → "0 / 5"
+		-- (looks done) → spawn 2 → "2 / 5" (counter went UP). The trick is to
+		-- compute enemiesLeft as `alive + (intended - spawnedCount)` while
+		-- spawning is in progress: NPCs not yet spawned are counted as
+		-- still-needs-killing, so the numerator only ever decreases on a kill.
+		--
+		-- spawnDone is the source of truth for "wave cleared" so we never
+		-- false-clear during the stagger window. Replaces the previous
+		-- `elapsed > 2` band-aid which broke if a max-stat dragon blitzed
+		-- the early Scouts before the Warrior had spawned.
 		local totalEnemies = waveDef.scouts + waveDef.warriors + waveDef.bosses
-		fireWaveState(waveNum, STATE_ACTIVE, { enemiesLeft = totalEnemies, totalEnemies = totalEnemies, isBossWave = waveDef.isBoss })
-		task.spawn(spawnWaveNPCs, waveDef, isRoundActive)
+		local spawnedCount = 0
+		local spawnDone = false
+
+		task.spawn(function()
+			for _ = 1, waveDef.scouts do
+				if not isRoundActive() then break end
+				if NPCManager.spawn("Scout") then spawnedCount += 1 end
+				task.wait(0.3)
+			end
+			for _ = 1, waveDef.warriors do
+				if not isRoundActive() then break end
+				if NPCManager.spawn("Warrior") then spawnedCount += 1 end
+				task.wait(0.5)
+			end
+			for _ = 1, waveDef.bosses do
+				if not isRoundActive() then break end
+				if NPCManager.spawn("Boss") then spawnedCount += 1 end
+				task.wait(0.8)
+			end
+			-- Marked even on early-bail (NPCManager.spawn returning nil at
+			-- MAX_NPCS cap, or isRoundActive flipping). The polling loop's
+			-- `spawnDone and alive == 0` clear condition stays correct
+			-- regardless: stragglers were either spawned (and need killing)
+			-- or were skipped (so the wave is genuinely complete once
+			-- everything alive is dead).
+			spawnDone = true
+		end)
+
+		-- Initial broadcast: nothing spawned yet, but pretend all are
+		-- pending so the kid sees "5 / 5" from t=0 instead of "0 / 5".
+		fireWaveState(waveNum, STATE_ACTIVE, {
+			enemiesLeft = totalEnemies,
+			totalEnemies = totalEnemies,
+			isBossWave = waveDef.isBoss,
+		})
 
 		local startTime = tick()
 		local timedOut = false
@@ -718,11 +744,21 @@ function NPCManager.runWaveSequence(
 			task.wait(WAVE_TICK_RATE)
 			local elapsed = tick() - startTime
 			local alive = countAliveNPCs()
-			fireWaveState(waveNum, STATE_ACTIVE, { enemiesLeft = alive, totalEnemies = totalEnemies, isBossWave = waveDef.isBoss })
-			-- Wave cleared: every NPC has been killed AND the spawn task is
-			-- past the initial spawn-stagger window so we don't false-clear
-			-- before the warriors/bosses have spawned.
-			if alive == 0 and elapsed > 2 then
+			-- Pending = NPCs the spawn task hasn't placed yet. Once spawnDone
+			-- flips, we drop pending to 0 even if MAX_NPCS rejected some — a
+			-- skipped NPC will never come, so it shouldn't count as "left to
+			-- kill" once spawning has finished trying.
+			local pending = if spawnDone then 0 else math.max(0, totalEnemies - spawnedCount)
+			local enemiesLeft = alive + pending
+			fireWaveState(waveNum, STATE_ACTIVE, {
+				enemiesLeft = enemiesLeft,
+				totalEnemies = totalEnemies,
+				isBossWave = waveDef.isBoss,
+			})
+			-- Wave cleared the moment spawning finished AND nothing's alive.
+			-- No false-clears during the stagger window because spawnDone
+			-- gates this branch.
+			if spawnDone and alive == 0 then
 				break
 			end
 			if elapsed >= WAVE_TIMEOUT then
@@ -752,10 +788,19 @@ function NPCManager.runWaveSequence(
 
 		-- RESTING: 15s breather. Skipped after wave 3 (round ends right
 		-- after the boss wave's CLEARED/TIMEOUT, no rest needed).
+		-- Pre-warn the kid about the boss wave during the rest preceding it
+		-- — the client switches to a red-themed countdown so the boss
+		-- doesn't surprise-spawn after a calm yellow rest pill.
 		if waveNum < NUM_WAVES then
+			local nextWaveNum = waveNum + 1
+			local nextIsBoss = WAVE_DEFS[nextWaveNum].isBoss
 			for sec = REST_DURATION, 1, -1 do
 				if not isRoundActive() then break end
-				fireWaveState(waveNum, STATE_RESTING, { secondsLeft = sec, nextWave = waveNum + 1 })
+				fireWaveState(waveNum, STATE_RESTING, {
+					secondsLeft = sec,
+					nextWave = nextWaveNum,
+					nextIsBoss = nextIsBoss,
+				})
 				task.wait(1)
 			end
 		end

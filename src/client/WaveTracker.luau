@@ -18,6 +18,11 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 
+-- Sibling module — same client script container. Used for the wave-clear
+-- "ding" reward sound; reusing the existing Coin asset is a no-cost win
+-- vs. introducing a dedicated wave-clear SoundManager entry.
+local SoundManager = require(script.Parent.SoundManager)
+
 local WaveTracker = {}
 
 local player = Players.LocalPlayer
@@ -168,6 +173,9 @@ local function handleCleared(waveNum: number, payload: any)
 	mainBanner.Text = `✅ WAVE {waveNum} CLEAR! +{reward} coins`
 	setPanelTheme(Color3.fromRGB(80, 220, 100), Color3.fromRGB(220, 255, 220))
 	flashClear()
+	-- Audio reward layered on the visual celebration. Coin is the existing
+	-- "ding" SFX — kids respond hard to chimes after kills. No new asset.
+	SoundManager.play("Coin")
 end
 
 local function handleTimeout(waveNum: number, _payload: any)
@@ -182,8 +190,19 @@ local function handleResting(_waveNum: number, payload: any)
 	screenGui.Enabled = true
 	local secondsLeft = (payload and payload.secondsLeft) or 0
 	local nextWave = (payload and payload.nextWave) or 0
-	mainBanner.Text = `Wave {nextWave} starts in {secondsLeft}s...`
-	setPanelTheme(Color3.fromRGB(255, 220, 100), Color3.fromRGB(255, 250, 200))
+	local nextIsBoss = payload and payload.nextIsBoss == true
+	-- Boss pre-warn: when the upcoming wave is the boss, the rest pill
+	-- shifts to the same red theme INCOMING uses for the boss wave. Without
+	-- this, kids get a calm yellow countdown and then a sudden red boss
+	-- banner — the boss wave deserves the "something big is coming"
+	-- foreshadowing during the entire rest period.
+	if nextIsBoss then
+		mainBanner.Text = `⚠️  BOSS WAVE in {secondsLeft}s...`
+		setPanelTheme(Color3.fromRGB(255, 80, 80), Color3.fromRGB(255, 220, 220))
+	else
+		mainBanner.Text = `Wave {nextWave} starts in {secondsLeft}s...`
+		setPanelTheme(Color3.fromRGB(255, 220, 100), Color3.fromRGB(255, 250, 200))
+	end
 
 	-- First-time-only tip: nudge the kid to use the Lair during the rest.
 	-- Sprint 7 will add stat upgrades in the Lair so this becomes more

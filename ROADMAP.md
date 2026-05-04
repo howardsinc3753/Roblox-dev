@@ -133,6 +133,30 @@ beats and kids feel structured progress.
   canonical round-progress UI; the safety-cap clock isn't surfaced to
   avoid misleading the kid with a 240s number.
 
+**Sprint 6 audit follow-ups (post-review):**
+- ✅ Closure-captured `spawnedCount` / `spawnDone` in `runWaveSequence`.
+  Fixes: counter going UP after a kill during the spawn-stagger window,
+  false-clear race when a max-stat dragon blitzes scouts before the
+  warrior spawns, and silent miscounts when MAX_NPCS = 12 caps a spawn.
+- ✅ `enemiesLeft = alive + (totalEnemies - spawnedCount)` while spawning,
+  collapsing to `alive` once `spawnDone`. Numerator only ever decreases
+  on a kill.
+- ✅ Boss pre-warn during RESTING: when `nextWave == NUM_WAVES`, the rest
+  pill switches to red "⚠️ BOSS WAVE in {N}s..." instead of the calm
+  yellow "Wave 3 starts in {N}s..." countdown.
+- ✅ Wave-clear audio: `SoundManager.play("Coin")` layered on the green
+  flash for the audible-reward beat.
+
+Audit findings deferred / declined:
+- "Mid-round joiner gets coins but no scoreboard credit" — incorrect.
+  `RoundManager.initPlayerScore` IS called from `Players.PlayerAdded`
+  (init.server.luau:164), so the joiner has a `state.scores` entry from
+  the moment they connect. `recordCoins` works.
+- `RoundManager.getWinner` returning a winner with 0 kills — pre-existing
+  (Sprint 6 just makes solo-PvE rounds more common, exposing it more
+  often). Not a Sprint 6 regression. Flagged for a later round-system
+  cleanup pass.
+
 ### Sprint 7 — Dragon Progression UI in Lair (~10-12 hours)
 - Stat board: see your dragon's level, XP bar, current stats
 - Upgrade station: spend coins on Atk/Def/Spd/Special points
