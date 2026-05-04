@@ -8,7 +8,8 @@ You're being onboarded to a Roblox game development project that uses our shared
 Read in this order:
 1. `CLAUDE.md` — project setup, tech stack (Luau + Rojo + Wally + Lune), AI workflow rules ("AI handles code/logic, human handles visuals/QA")
 2. `CODE_MAP.md` — **REQUIRED**. Dependency graph + "if you touch X, these things break" cheatsheet. Read before editing ANY server module.
-3. `DESIGN.md` — game design (current spec or template for new game)
+3. `ROADMAP.md` — **REQUIRED**. Game vision, 3-zone architecture, player journey, current sprint status. Tells you WHY we're building what we're building.
+4. `DESIGN.md` — game design (current spec or template for new game)
 4. `SKILL.md` — Roblox SDK reference router (which `references/<file>.md` to read for which task)
 5. List `references/` so you know what specialized docs are available
 
