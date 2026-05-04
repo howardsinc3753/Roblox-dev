@@ -373,12 +373,49 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 	if typeof(origin) ~= "Vector3" or typeof(direction) ~= "Vector3" then return end
 	if not CombatManager.canFireBreath(player) then return end
 	if not RoundManager.isActive() then return end
-	-- Sprint 5 Part D: no PvP / NPC combat from the Lair. Early return BEFORE
-	-- recordBreath so the cooldown isn't burned — kid can save their breath
-	-- for when they portal into the Arena. CombatManager helpers also gate
-	-- defensively, so even if this check were removed the Lair-target rule
-	-- still holds.
-	if ZoneManager.isPlayerInLair(player) then return end
+	-- Sprint 5 Part D: no PvP / NPC combat from the Lair.
+	-- Sprint 7 carve-out: practice dummies are a valid Lair target so kids
+	-- can test their just-purchased upgrades. The carve-out is narrow on
+	-- purpose — only the dummy-hit branch runs; the player + NPC paths
+	-- below are STILL skipped (the early return below the dummy handler
+	-- preserves the safe-zone rule for everything else). Cooldown still
+	-- burns on a dummy hit because, from the kid's perspective, they DID
+	-- fire their breath — pretending it didn't happen would be confusing.
+	-- CombatManager helpers also gate defensively (findHitPlayer /
+	-- findPlayersInCone return empty for Lair shooters), so the Lair-only
+	-- targeting rule holds even if this branch were edited.
+	if ZoneManager.isPlayerInLair(player) then
+		CombatManager.recordBreath(player)
+		local state = CombatManager.getState(player)
+		if not state then return end
+		-- Same client-origin clamp as the Arena path: snap to server-side
+		-- position if the client claims an origin >8 studs from where they
+		-- actually are (anti-cheat on dummy damage too — even though dummies
+		-- don't reward, an inflated cone could vault past LineOfSight checks
+		-- in future and let kids "test" through walls).
+		local character = player.Character
+		if character and character.PrimaryPart then
+			local serverPos = character.PrimaryPart.Position
+			if (origin :: Vector3 - serverPos).Magnitude > 8 then
+				origin = serverPos
+			end
+		end
+		local dirMag = (direction :: Vector3).Magnitude
+		if dirMag < 0.01 or dirMag > 100 then return end
+
+		local hitDummy = LairBuilder.findHitDummy(origin :: Vector3, direction :: Vector3)
+		if hitDummy then
+			-- Damage uses state.damage (upgrade-aware) so the kid sees their
+			-- new attack-stat reflected on the dummy. No falloff, no NPC
+			-- callbacks, no scoreboard — purely a feedback loop for testing.
+			local newHp = LairBuilder.damageDummy(hitDummy, state.damage)
+			-- Tell the shooter so the client can render a floating "-N" above
+			-- the dummy. FireClient (not FireAllClients) — others' dummies
+			-- don't need our damage spam.
+			dummyHitRemote:FireClient(player, hitDummy.part, state.damage, newHp, hitDummy.maxHp)
+		end
+		return -- preserve the no-PvP/no-NPC rule from Sprint 5 Part D
+	end
 
 	CombatManager.recordBreath(player)
 

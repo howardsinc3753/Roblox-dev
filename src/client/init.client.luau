@@ -257,6 +257,21 @@ damageNPCRemote.OnClientEvent:Connect(function(npcModel: Model, damage: number)
 	showFloatingDamage(npcModel.PrimaryPart, damage)
 end)
 
+-- Sprint 7: practice-dummy hit feedback. Server fires this to the shooter
+-- when their breath cone hits a tagged Lair dummy. Renders the same
+-- floating "-N" pattern as NPC hits + plays the Hit sound. Server is
+-- authoritative on the damage number; client just visualizes.
+do
+	local dummyHitRemote = remotes:WaitForChild("DummyHit", 10) :: RemoteEvent?
+	if dummyHitRemote then
+		dummyHitRemote.OnClientEvent:Connect(function(dummyPart: BasePart, damage: number, _newHp: number, _maxHp: number)
+			if not dummyPart or not dummyPart.Parent then return end
+			SoundManager.play("Hit")
+			showFloatingDamage(dummyPart, damage)
+		end)
+	end
+end
+
 -- H2 fix: render a visible projectile from an attacking NPC to its target.
 -- Fired to all clients so everyone sees the breath, not just the victim.
 npcBreathFiredRemote.OnClientEvent:Connect(function(npcModel: Model, targetPos: Vector3, color: Color3)
