@@ -28,6 +28,12 @@ local dragonCards: { [string]: { card: Frame, status: TextLabel } } = {}
 local cachedCoins = 0
 local cachedSelected = "Ember"
 local cachedUnlocks: { [string]: boolean } = { Ember = true, Frost = true }
+-- Sprint 7 polish: per-dragon upgrade levels (sum of atk+def+spd+special)
+-- so each card can show a "Lv N" badge. Kid playtest feedback: "kids
+-- love looking at their Dragon Stats, like the B menu they should
+-- feel how Strong their dragon is." Populated from PlayerData via
+-- updatePlayerData. Default empty so unupgraded dragons show "Lv 0".
+local cachedDragonUpgrades: { [string]: { atk: number, def: number, spd: number, special: number } } = {}
 
 -- Remotes
 local selectDragonRemote: RemoteEvent?
@@ -75,6 +81,36 @@ local function refreshCard(dragonId: string)
 		card.card.BackgroundTransparency = 0.5
 		card.status.Text = `Locked ({dragon.cost} coins)`
 		card.status.TextColor3 = Color3.fromRGB(150, 150, 150)
+	end
+
+	-- Sprint 7: refresh the Lv N badge. Hidden for locked dragons (the
+	-- kid hasn't started progression on them anyway), subdued grey at
+	-- Lv 0 for owned dragons, gold at Lv 1+. Reads from cachedDragonUpgrades
+	-- which gets populated by updatePlayerData() on every server refresh.
+	local levelBadge = card.card:FindFirstChild("LevelBadge") :: TextLabel?
+	if levelBadge then
+		if not isUnlocked then
+			levelBadge.Visible = false
+		else
+			levelBadge.Visible = true
+			local upgrades = cachedDragonUpgrades[dragonId]
+			local total = 0
+			if upgrades then
+				total = (upgrades.atk or 0) + (upgrades.def or 0)
+					+ (upgrades.spd or 0) + (upgrades.special or 0)
+			end
+			levelBadge.Text = `Lv {total}`
+			local stroke = levelBadge:FindFirstChildWhichIsA("UIStroke")
+			if total <= 0 then
+				levelBadge.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+				levelBadge.TextColor3 = Color3.fromRGB(170, 170, 180)
+				if stroke then stroke.Color = Color3.fromRGB(110, 110, 120) end
+			else
+				levelBadge.BackgroundColor3 = Color3.fromRGB(80, 60, 30)
+				levelBadge.TextColor3 = Color3.fromRGB(255, 215, 0)
+				if stroke then stroke.Color = Color3.fromRGB(255, 215, 0) end
+			end
+		end
 	end
 end
 
@@ -151,6 +187,32 @@ local function buildCard(dragonId: string, parent: Frame): { card: Frame, status
 	statsLabel.TextXAlignment = Enum.TextXAlignment.Left
 	statsLabel.TextYAlignment = Enum.TextYAlignment.Top
 	statsLabel.Parent = card
+
+	-- Sprint 7 polish: "Lv N" badge in the card's top-right corner. Tied
+	-- to the sum of upgrade levels for this specific dragon. Subdued grey
+	-- at Lv 0, gold at Lv 1+. Mirrors the HUD level-badge treatment so
+	-- the kid sees consistent progression cues across the game.
+	local levelBadge = Instance.new("TextLabel")
+	levelBadge.Name = "LevelBadge"
+	levelBadge.Size = UDim2.fromOffset(56, 24)
+	levelBadge.Position = UDim2.new(1, -64, 0, 12)
+	levelBadge.BackgroundColor3 = Color3.fromRGB(50, 50, 60)
+	levelBadge.BackgroundTransparency = 0.2
+	levelBadge.Text = "Lv 0"
+	levelBadge.TextColor3 = Color3.fromRGB(170, 170, 180)
+	levelBadge.Font = Enum.Font.GothamBlack
+	levelBadge.TextSize = 13
+	levelBadge.BorderSizePixel = 0
+	levelBadge.ZIndex = 3
+	levelBadge.Parent = card
+	local levelCorner = Instance.new("UICorner")
+	levelCorner.CornerRadius = UDim.new(0, 6)
+	levelCorner.Parent = levelBadge
+	local levelStroke = Instance.new("UIStroke")
+	levelStroke.Color = Color3.fromRGB(110, 110, 120)
+	levelStroke.Thickness = 1
+	levelStroke.Transparency = 0.4
+	levelStroke.Parent = levelBadge
 
 	-- Status label at bottom (Equipped / Click to select / Buy: X coins / Locked)
 	local status = Instance.new("TextLabel")
@@ -348,15 +410,33 @@ function DragonSelectUI.updateCoins(coins: number)
 	refreshAllCards()
 end
 
-function DragonSelectUI.updatePlayerData(data: { coins: number, unlockedDragons: { [string]: boolean }, selectedDragon: string }?)
+function DragonSelectUI.updatePlayerData(data: any?)
 	if not data then return end
 	cachedCoins = data.coins
 	cachedUnlocks = data.unlockedDragons
 	cachedSelected = data.selectedDragon
+	-- Sprint 7: pull dragonUpgrades into local cache so each card's "Lv N"
+	-- badge reflects the kid's progression. Defaults to empty for old
+	-- saves (deepMerge fills the field at server-side load).
+	if data.dragonUpgrades then
+		cachedDragonUpgrades = data.dragonUpgrades
+	end
 	if screenGui and screenGui:FindFirstChild("Coins") then
 		(screenGui.Coins :: TextLabel).Text = `{data.coins} coins`
 	end
 	refreshAllCards()
+end
+
+-- Sprint 7: server pushes per-dragon upgrade levels via DragonStatsUpdated
+-- whenever a kid buys an upgrade. Update the local cache + refresh the
+-- card so the Lv N badge increments live (no need to wait for next
+-- GetPlayerData refresh).
+function DragonSelectUI.updateDragonLevels(dragonId: string, levels: any)
+	if not levels then return end
+	cachedDragonUpgrades[dragonId] = levels
+	if dragonCards[dragonId] then
+		refreshCard(dragonId)
+	end
 end
 
 function DragonSelectUI.updateSubtitle(text: string)

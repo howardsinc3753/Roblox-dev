@@ -173,6 +173,10 @@ do
 	if statsRemote then
 		statsRemote.OnClientEvent:Connect(function(dragonId: string, levels: any, effective: any)
 			DragonUpgradeUI.updateStats(dragonId, levels, effective)
+			-- Sprint 7 polish: keep the B-menu's per-card Lv N badge in
+			-- sync as upgrades land. Without this, the badge only refreshes
+			-- on the next GetPlayerData round-trip (only happens at join).
+			DragonSelectUI.updateDragonLevels(dragonId, levels)
 			-- Apply speed override to the flight controller so a +Spd
 			-- upgrade visibly affects movement without a respawn (peer #6).
 			if effective and effective.speed then

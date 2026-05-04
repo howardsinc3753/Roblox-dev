@@ -91,6 +91,14 @@ local rebuild: () -> ()
 -- ===== Remotes (set in init) =====
 local upgradeStatRemote: RemoteEvent? = nil
 local markLairTutorialSeenRemote: RemoteEvent? = nil
+-- Sprint 7 polish: lets the upgrade modal also unlock dragons (kid
+-- playtest feedback: "upgrade menu should allow you to BUY new dragons
+-- in there as well as the B menu"). Same UnlockDragon remote the
+-- existing DragonSelectUI fires — server validates funds + ownership
+-- + flips unlockedDragons[id] = true → fires UpdateCoins back. We
+-- listen to UpdateCoins via updateCoins() and PlayerData refreshes via
+-- updatePlayerData(); both keep the modal's cached state in sync.
+local unlockDragonRemote: RemoteEvent? = nil
 
 -- ===== Helpers =====
 local function getEffectiveValue(dragonId: string, valueField: string): number
@@ -395,19 +403,96 @@ local function buildTab(parent: Frame, dragonId: string, layoutOrder: number)
 	btn.Font = Enum.Font.GothamBold
 	btn.TextSize = 14
 	btn.BorderSizePixel = 0
-	btn.AutoButtonColor = owned
-	btn.Active = owned
+	btn.AutoButtonColor = true -- click both owned + locked tabs
+	btn.Active = true
 	btn.Parent = parent
 	local btnCorner = Instance.new("UICorner")
 	btnCorner.CornerRadius = UDim.new(0, 8)
 	btnCorner.Parent = btn
 
-	if owned then
-		btn.Activated:Connect(function()
-			if activeTab ~= dragonId then
-				activeTab = dragonId
-				rebuild()
-			end
+	-- POST-PLAYTEST: locked tabs are NOW clickable too. Clicking a locked
+	-- tab switches activeTab and rebuild() renders an unlock-buy panel
+	-- instead of the upgrade rows. This delivers on the kid's "let me
+	-- buy dragons here too" feedback without forcing them to leave the
+	-- modal, port through to Arena, press B, etc.
+	btn.Activated:Connect(function()
+		if activeTab ~= dragonId then
+			activeTab = dragonId
+			rebuild()
+		end
+	end)
+end
+
+-- ===== Locked-dragon buy panel =====
+-- Renders inside `statsContainer` when activeTab is a dragon the player
+-- doesn't own yet. Single big "Unlock for {cost} 🪙" button + dragon
+-- preview stats so kids can see what they're buying. Click fires
+-- UnlockDragon (same remote DragonSelectUI uses); server validates funds
+-- and replies via UpdateCoins → our updateCoins handler refreshes the
+-- modal. The kid sees the dragon's tab go from 🔒 to ✓ on their next
+-- modal open or rebuild trigger.
+local function buildUnlockPanel(parent: Frame, dragonId: string)
+	local base = DragonConfig[dragonId]
+	if not base then return end
+	local cost = base.cost or 0
+	local canAfford = cachedCoins >= cost
+
+	-- Header: dragon name + element + base stats
+	local header = Instance.new("TextLabel")
+	header.Size = UDim2.new(1, 0, 0, 30)
+	header.BackgroundTransparency = 1
+	header.Text = `🔒 {base.name} — {base.element}`
+	header.TextColor3 = base.color
+	header.Font = Enum.Font.GothamBlack
+	header.TextSize = 22
+	header.LayoutOrder = 1
+	header.Parent = parent
+
+	-- Base stats preview (HP / DMG / SPD / Special). Reads from DragonConfig
+	-- since we don't have a per-player effective-stats cache for locked dragons.
+	local statsPreview = Instance.new("TextLabel")
+	statsPreview.Size = UDim2.new(1, 0, 0, 60)
+	statsPreview.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+	statsPreview.BackgroundTransparency = 0.2
+	statsPreview.BorderSizePixel = 0
+	statsPreview.Text = `❤️ {base.health} HP    ⚔️ {base.damage} DMG    💨 {base.speed} SPD\n✨ {base.specialName}`
+	statsPreview.TextColor3 = Color3.fromRGB(220, 220, 235)
+	statsPreview.Font = Enum.Font.GothamBold
+	statsPreview.TextSize = 16
+	statsPreview.LayoutOrder = 2
+	statsPreview.Parent = parent
+	local previewCorner = Instance.new("UICorner")
+	previewCorner.CornerRadius = UDim.new(0, 8)
+	previewCorner.Parent = statsPreview
+
+	-- Big buy button. Greyed out if can't afford.
+	local buyBtn = Instance.new("TextButton")
+	buyBtn.Size = UDim2.new(1, 0, 0, 60)
+	buyBtn.BackgroundColor3 = if canAfford then Color3.fromRGB(80, 200, 100) else Color3.fromRGB(80, 80, 90)
+	buyBtn.Text = if canAfford then `🔓 UNLOCK for {cost} 🪙` else `Need {cost - cachedCoins} more 🪙`
+	buyBtn.TextColor3 = if canAfford then Color3.fromRGB(255, 255, 255) else Color3.fromRGB(160, 160, 170)
+	buyBtn.Font = Enum.Font.GothamBlack
+	buyBtn.TextSize = 22
+	buyBtn.BorderSizePixel = 0
+	buyBtn.AutoButtonColor = canAfford
+	buyBtn.Active = canAfford
+	buyBtn.LayoutOrder = 3
+	buyBtn.Parent = parent
+	local buyCorner = Instance.new("UICorner")
+	buyCorner.CornerRadius = UDim.new(0, 10)
+	buyCorner.Parent = buyBtn
+	if canAfford then
+		buyBtn.Activated:Connect(function()
+			if not unlockDragonRemote then return end
+			-- Optimistic UI: assume the server will accept (we already
+			-- validated funds above). If server rejects, the next
+			-- PlayerData refresh will re-grey the dragon and the kid
+			-- sees "huh, didn't go through" — rare and self-correcting.
+			unlockDragonRemote:FireServer(dragonId)
+			SoundManager.play("Purchase")
+			unlockedDragons[dragonId] = true
+			cachedCoins -= cost
+			rebuild() -- redraw to show the now-owned dragon's stat rows
 		end)
 	end
 end
@@ -441,14 +526,20 @@ rebuild = function()
 		order += 1
 	end
 
-	-- Stat rows
+	-- Stat rows OR unlock-buy panel depending on whether the active tab
+	-- is owned. Locked dragon → render the buy panel; owned → standard
+	-- four upgrade rows.
 	statsContainer:ClearAllChildren()
 	local statsLayout = Instance.new("UIListLayout")
 	statsLayout.Padding = UDim.new(0, 8)
 	statsLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	statsLayout.Parent = statsContainer
-	for i, meta in STAT_META do
-		buildStatRow(statsContainer, activeTab, meta, i)
+	if not unlockedDragons[activeTab] then
+		buildUnlockPanel(statsContainer, activeTab)
+	else
+		for i, meta in STAT_META do
+			buildStatRow(statsContainer, activeTab, meta, i)
+		end
 	end
 end
 
@@ -736,6 +827,8 @@ function DragonUpgradeUI.init()
 	-- MarkLairTutorialSeen is wired in a follow-up step; fall back to nil
 	-- gracefully if it's not yet registered.
 	markLairTutorialSeenRemote = remotes:FindFirstChild("MarkLairTutorialSeen") :: RemoteEvent?
+	-- Dragon unlock — same remote DragonSelectUI fires.
+	unlockDragonRemote = remotes:WaitForChild("UnlockDragon", 10) :: RemoteEvent?
 
 	local dragonStatsUpdated = remotes:WaitForChild("DragonStatsUpdated", 10) :: RemoteEvent?
 	if dragonStatsUpdated then

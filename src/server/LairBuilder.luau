@@ -546,7 +546,7 @@ local function buildInteractionStones(parent: Instance)
 	-- is invisible and we don't want the visible obelisk to occlude it.
 	-- Range 8 (slightly larger than 6) compensates for the anchor size.
 	local interactionAnchor = makePart("StatStoneInteraction", parent, {
-		Size = Vector3.new(8, 14, 8),
+		Size = Vector3.new(12, 18, 12),
 		CFrame = CFrame.new(statPos + Vector3.new(0, 7, 0)),
 		Transparency = 1,
 		CanCollide = false, -- kid can walk through (and they need to to read the prompt)
@@ -557,10 +557,107 @@ local function buildInteractionStones(parent: Instance)
 	prompt.ActionText = "Upgrade Dragon"
 	prompt.ObjectText = "Stat Stone"
 	prompt.KeyboardKeyCode = Enum.KeyCode.E
-	prompt.MaxActivationDistance = 8
+	-- Range 14 (was 8). Playtest feedback was kids would walk past the
+	-- obelisk without the prompt firing reliably. 14 studs is a 2-3 step
+	-- cushion around the visible obelisk so casual approach always
+	-- triggers the prompt without it going off when crossing the Lair
+	-- on the way to the portal.
+	prompt.MaxActivationDistance = 14
 	prompt.RequiresLineOfSight = false
 	prompt.HoldDuration = 0
 	prompt.Parent = interactionAnchor
+
+	-- ===== EYE CANDY =====
+	-- Sprint 7 polish: kid playtest reported the obelisk reads "lame".
+	-- Layer a floating mini-crystal above it with continuous rotation,
+	-- bobbing motion, particle sparkles, and a colored point light. Reads
+	-- as a magical interaction point — pulls the eye to it from across
+	-- the Lair so kids notice WHERE to upgrade without needing a marker.
+	local crystalCenter = statPos + Vector3.new(0, 18, 0) -- ~4 studs above obelisk top
+	local crystal = makePart("StatStoneCrystal", parent, {
+		Size = Vector3.new(2.5, 4, 2.5),
+		CFrame = CFrame.new(crystalCenter) * CFrame.Angles(0, 0, math.rad(45)),
+		Color = Color3.fromRGB(120, 220, 255),
+		Material = Enum.Material.Neon,
+		Transparency = 0.15,
+	})
+	-- Continuous rotation via TweenService loop. RepeatCount = -1 keeps
+	-- it spinning forever; reverses=false so it doesn't ping-pong.
+	-- Server-side tween, replicates to clients automatically (Anchored
+	-- parts replicate CFrame changes at low cost).
+	local TweenService = game:GetService("TweenService")
+	local rotationGoal = crystal.CFrame * CFrame.Angles(0, math.rad(360), 0)
+	local rotationTween = TweenService:Create(crystal,
+		TweenInfo.new(6, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1, false, 0),
+		{ CFrame = rotationGoal }
+	)
+	rotationTween:Play()
+
+	-- Sparkle particles emitted from the crystal so it visibly "magic"s
+	-- without a custom mesh.
+	local crystalAttach = Instance.new("Attachment")
+	crystalAttach.Parent = crystal
+	local sparkles = Instance.new("ParticleEmitter")
+	sparkles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	sparkles.Color = ColorSequence.new(Color3.fromRGB(180, 240, 255))
+	sparkles.Size = NumberSequence.new(0.6, 0.1)
+	sparkles.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	sparkles.Lifetime = NumberRange.new(0.8, 1.6)
+	sparkles.Rate = 25
+	sparkles.Speed = NumberRange.new(0.5, 2)
+	sparkles.SpreadAngle = Vector2.new(180, 180)
+	sparkles.Parent = crystalAttach
+
+	-- Colored point light cast onto the obelisk + floor below. Range tuned
+	-- so the floor disc immediately around the obelisk picks up a cyan
+	-- glow — visible from far away, draws the kid's eye toward this
+	-- specific obelisk (vs. the Shop Stone which has no such glow).
+	local crystalLight = Instance.new("PointLight")
+	crystalLight.Color = Color3.fromRGB(120, 220, 255)
+	crystalLight.Brightness = 4
+	crystalLight.Range = 30
+	crystalLight.Parent = crystal
+
+	-- Smaller orbital crystals that circle the main one. Adds depth +
+	-- "this is special" feeling. Three orbiters at 120° spacing.
+	for i = 1, 3 do
+		local orbitCrystal = makePart(`StatStoneOrbiter_{i}`, parent, {
+			Size = Vector3.new(1, 1.5, 1),
+			Color = Color3.fromRGB(150, 230, 255),
+			Material = Enum.Material.Neon,
+			Transparency = 0.2,
+		})
+		-- Orbit via TweenService too. Each orbiter starts at a different
+		-- angle around the crystal so they're spread evenly. Tweening the
+		-- CFrame around a vertical axis through crystalCenter.
+		local startAngle = (i - 1) * math.pi * 2 / 3
+		local radius = 4
+		orbitCrystal.CFrame = CFrame.new(crystalCenter + Vector3.new(
+			math.cos(startAngle) * radius, 0, math.sin(startAngle) * radius
+		))
+		-- Multi-step orbit: tween through 4 quarter-points so the path is
+		-- circular, not just two endpoints. Each orbiter takes 8 seconds
+		-- per revolution.
+		task.spawn(function()
+			while orbitCrystal.Parent do
+				for step = 1, 8 do
+					local angle = startAngle + math.pi * 2 * (step / 8)
+					local target = CFrame.new(crystalCenter + Vector3.new(
+						math.cos(angle) * radius, math.sin(angle * 2) * 0.5, math.sin(angle) * radius
+					))
+					local stepTween = TweenService:Create(orbitCrystal,
+						TweenInfo.new(1.0, Enum.EasingStyle.Linear),
+						{ CFrame = target }
+					)
+					stepTween:Play()
+					stepTween.Completed:Wait()
+				end
+			end
+		end)
+	end
 
 	-- Shop Stone (right of pillar) — same obelisk asset, mirror position
 	local shopPos = LAIR_CENTER + Vector3.new(50, FLOOR_THICKNESS / 2, 0)
