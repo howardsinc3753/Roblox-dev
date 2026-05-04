@@ -217,11 +217,54 @@ local function buildFloor(parent: Instance)
 	})
 end
 
+-- Sprint 8: element-color cycle for the central pillar's glow. Loop
+-- through the same six element colors that drive the arches around the
+-- Lair so the centerpiece reads as a "convergence point" of all elements.
+-- Each step takes ELEMENT_CYCLE_SEC seconds to fade into the next; the
+-- whole 6-color cycle runs in 6 × ELEMENT_CYCLE_SEC ≈ 18 seconds, so it
+-- feels like a slow magical pulse, not a disco strobe.
+local ELEMENT_CYCLE_COLORS = {
+	Color3.fromRGB(255, 80, 20),   -- Fire
+	Color3.fromRGB(100, 180, 255), -- Ice
+	Color3.fromRGB(255, 255, 50),  -- Lightning
+	Color3.fromRGB(139, 119, 80),  -- Earth
+	Color3.fromRGB(120, 50, 180),  -- Dark
+	Color3.fromRGB(255, 230, 180), -- Light
+}
+local ELEMENT_CYCLE_SEC = 3 -- per-color dwell time
+
+-- Sprint 8: helper that animates a Color3 property in a continuous loop
+-- through ELEMENT_CYCLE_COLORS. Used by the central pillar light + the
+-- pillar-of-light beam so they cycle in lockstep. instance can be a
+-- PointLight (animates .Color) or a BasePart (animates .Color).
+local function startColorCycleLoop(instance: Instance, propertyName: string)
+	local TweenService = game:GetService("TweenService")
+	task.spawn(function()
+		local i = 1
+		while instance.Parent do
+			local target = ELEMENT_CYCLE_COLORS[i]
+			local tween = TweenService:Create(instance,
+				TweenInfo.new(ELEMENT_CYCLE_SEC, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+				{ [propertyName] = target }
+			)
+			tween:Play()
+			tween.Completed:Wait()
+			i = (i % #ELEMENT_CYCLE_COLORS) + 1
+		end
+	end)
+end
+
 -- Central Pillar: try Meshy AI crystal tower first; fall back to a
 -- programmatic stacked-cube cluster if asset load fails. Either way the
 -- centerpiece reads as the magical focal point of the Lair.
+--
+-- Sprint 8 glow-up: continuous Y-rotation tween, color-cycling PointLight
+-- (Fire→Ice→Lightning→Earth→Dark→Light loop), vertical pillar-of-light
+-- beam shooting up to ~Y=600, particle aura at the base. Pulls the eye
+-- across the entire Lair to this focal point.
 local function buildCentralPillar(parent: Instance)
 	local pillarBase = LAIR_CENTER + Vector3.new(0, FLOOR_THICKNESS / 2, 0)
+	local TweenService = game:GetService("TweenService")
 
 	-- Hero load attempt. Scale 1.5 — Meshy assets default sizes vary, tune
 	-- after seeing the result in playtest.
@@ -233,9 +276,9 @@ local function buildCentralPillar(parent: Instance)
 		-- the centerpiece. Position relative to bounding box top.
 		local _meshCF, meshSize = hero:GetBoundingBox()
 		local light = Instance.new("PointLight")
-		light.Color = Color3.fromRGB(200, 180, 255)
-		light.Brightness = 5
-		light.Range = 80
+		light.Color = ELEMENT_CYCLE_COLORS[1]
+		light.Brightness = 6
+		light.Range = 100
 		-- Parent light to a part inside the hero — find the first BasePart
 		local hostPart: BasePart? = nil
 		for _, descendant in hero:GetDescendants() do
@@ -247,6 +290,83 @@ local function buildCentralPillar(parent: Instance)
 		if hostPart then
 			light.Parent = hostPart
 		end
+		-- Element-color cycle on the apex light. Server-side tween,
+		-- replicates the .Color change to all clients automatically.
+		startColorCycleLoop(light, "Color")
+
+		-- Pillar of light: a thin vertical neon cylinder shooting up
+		-- from the tower into the sky. Color-cycles in lockstep with
+		-- the apex light so the whole structure pulses as one.
+		local PILLAR_HEIGHT = 100
+		local pillarBeam = makePart("CentralPillarBeam", parent, {
+			Shape = Enum.PartType.Cylinder,
+			Size = Vector3.new(PILLAR_HEIGHT, 1.5, 1.5),
+			CFrame = CFrame.new(pillarBase + Vector3.new(0, PILLAR_HEIGHT / 2 + 30, 0))
+				* CFrame.Angles(0, 0, math.rad(90)),
+			Color = ELEMENT_CYCLE_COLORS[1],
+			Material = Enum.Material.Neon,
+			Transparency = 0.5,
+		})
+		startColorCycleLoop(pillarBeam, "Color")
+
+		-- Continuous slow rotation of the hero. Uses CFrame tween on each
+		-- BasePart inside the hero — the asset is welded together so
+		-- rotating the first part rotates the whole tower visually.
+		-- 12-second revolution is slow enough to feel ambient, not dizzy.
+		if hostPart then
+			task.spawn(function()
+				while hostPart and hostPart.Parent do
+					-- Rebuild the goal CFrame each iteration so we always
+					-- rotate by exactly 360° from the current orientation,
+					-- avoiding cumulative drift if the host moves.
+					local startCF = hostPart.CFrame
+					for step = 1, 12 do
+						if not hostPart.Parent then break end
+						local target = startCF * CFrame.Angles(0, math.rad(30 * step), 0)
+						local tween = TweenService:Create(hostPart,
+							TweenInfo.new(1.0, Enum.EasingStyle.Linear),
+							{ CFrame = target }
+						)
+						tween:Play()
+						tween.Completed:Wait()
+					end
+				end
+			end)
+		end
+
+		-- Particle aura at the base of the tower. Rising sparkles in
+		-- the active element color so the pillar looks alive even from
+		-- far away.
+		local baseAttach = Instance.new("Attachment")
+		baseAttach.Name = "PillarBaseAttach"
+		baseAttach.Position = Vector3.new(0, 2, 0)
+		baseAttach.Parent = if hostPart then hostPart else (parent:FindFirstChild("LairFloor") :: BasePart)
+		local aura = Instance.new("ParticleEmitter")
+		aura.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+		aura.Color = ColorSequence.new(ELEMENT_CYCLE_COLORS[1])
+		aura.Size = NumberSequence.new(1.5, 0.2)
+		aura.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.2),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		aura.Lifetime = NumberRange.new(1.5, 3)
+		aura.Rate = 30
+		aura.Speed = NumberRange.new(3, 6)
+		aura.SpreadAngle = Vector2.new(8, 8)
+		aura.VelocityInheritance = 0
+		aura.Acceleration = Vector3.new(0, 5, 0) -- gentle upward drift
+		aura.Parent = baseAttach
+		-- Color-cycle the aura particles too via a separate task that
+		-- updates aura.Color. ParticleEmitter doesn't accept tween on
+		-- ColorSequence, so write directly to it on each cycle step.
+		task.spawn(function()
+			local i = 1
+			while aura.Parent do
+				task.wait(ELEMENT_CYCLE_SEC)
+				i = (i % #ELEMENT_CYCLE_COLORS) + 1
+				aura.Color = ColorSequence.new(ELEMENT_CYCLE_COLORS[i])
+			end
+		end)
 		return
 	end
 
