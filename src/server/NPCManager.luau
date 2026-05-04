@@ -847,7 +847,19 @@ function NPCManager.runWaveSequence(
 	-- boss appear but can't damage it yet (no findHitNPC integration);
 	-- the encounter exits via timeout. That's fine for incremental
 	-- shipping — kid sees the model, knows something's coming.
-	if isRoundActive() and roundNumber % MEGA_BOSS_CADENCE == 0 then
+	-- Sprint 10 QA toggle: workspace attribute STUDIO_FORCE_MEGA_BOSS
+	-- forces every round to be a Mega-Boss-Round in Studio playtest.
+	-- Without this, testing the boss takes ~9 minutes of real-time
+	-- play (3 full rounds) before round 3 hits the cadence trigger.
+	-- Same pattern as DataManager's STUDIO_FRESH_PLAYER /
+	-- STUDIO_MAXED_UPGRADES toggles. Production builds
+	-- (RunService:IsStudio() = false) ignore the attribute entirely
+	-- so live kids never get bosses-every-round.
+	local isMegaBossRound = roundNumber % MEGA_BOSS_CADENCE == 0
+	if RunService:IsStudio() and workspace:GetAttribute("STUDIO_FORCE_MEGA_BOSS") == true then
+		isMegaBossRound = true
+	end
+	if isRoundActive() and isMegaBossRound then
 		print(`[NPCManager] Round {roundNumber} is a Mega-Boss-Round; spawning Blaze`)
 		-- Sprint 10 audit fix: count ARENA players, not total server
 		-- players. Original `#Players:GetPlayers()` would inflate boss HP
