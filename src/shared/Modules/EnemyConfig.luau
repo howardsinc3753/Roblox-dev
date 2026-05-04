@@ -74,6 +74,32 @@ local Enemies: { [string]: EnemyStats } = {
 		meshAssetId = 133112860627881, -- Terra dragon (chunky/tank look)
 		meshScale = 6,
 	},
+	-- Sprint 10: Mega Boss tier — BLAZE THE INFERNO LORD. Spawns once per
+	-- Mega-Boss-Round (every 3rd round). HP scales by player count at
+	-- spawn (not stored here — BossManager.spawnBlaze multiplies the base).
+	-- Telegraphed attacks (Inferno Slam circle + Magma Beam line) replace
+	-- the standard NPC AI breath; the regular `damage` field below applies
+	-- ONLY to those telegraphed attacks. coinReward here is the total pool
+	-- distributed by damage contribution (see BossManager death payout).
+	-- Visual: Storm dragon mesh upscaled to scale 12, deep-red tint.
+	-- Replaces a custom mesh upload for MVP — Stage 1.5 may swap to a
+	-- bespoke Blaze model.
+	Blaze = {
+		name = "Blaze the Inferno Lord",
+		tier = "MegaBoss",
+		health = 800, -- BASE HP; BossManager multiplies by playerCount at spawn
+		speed = 25, -- slower than regular bosses — kids need to be able to disengage
+		damage = 25, -- per telegraphed attack hit; not used for auto-breath
+		detectionRange = 250,
+		attackRange = 80, -- Inferno Slam range; beam goes farther via separate const
+		attackCooldown = 5, -- between attack telegraphs
+		coinReward = 300, -- damage-share pool (50 flat participation paid separately)
+		color = Color3.fromRGB(200, 30, 20), -- deep red signature
+		secondaryColor = Color3.fromRGB(255, 140, 40),
+		scale = 3.0,
+		meshAssetId = 118836377435399, -- Storm dragon mesh, upscaled
+		meshScale = 12, -- 3-4× normal NPC visual presence (peer audit guidance)
+	},
 }
 
 return Enemies

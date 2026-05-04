@@ -39,6 +39,11 @@ export type PlayerData = {
 		totalKills: number,
 		totalDeaths: number,
 		gamesPlayed: number,
+		-- Sprint 10: count of Mega Bosses (Blaze and Stage 1.5 reskins)
+		-- the player has personally damaged before death. Persistent
+		-- bragging-rights badge — visible in the B menu later as
+		-- "Bosses Defeated: N." Underrated retention hook per peer audit.
+		bossesDefeated: number,
 	},
 	-- Retention tracking. Days are stored as integers in YYYYMMDD form (UTC)
 	-- so comparisons are fast and time-zone independent.
@@ -64,7 +69,7 @@ local DEFAULT_DATA: PlayerData = {
 	coins = 0,
 	unlockedDragons = { Ember = true, Frost = true },
 	selectedDragon = "Ember",
-	stats = { totalKills = 0, totalDeaths = 0, gamesPlayed = 0 },
+	stats = { totalKills = 0, totalDeaths = 0, gamesPlayed = 0, bossesDefeated = 0 },
 	lastLoginDay = 0,
 	loginStreak = 0,
 	lastWinDay = 0,
@@ -89,6 +94,7 @@ local function getDefault(): PlayerData
 			totalKills = 0,
 			totalDeaths = 0,
 			gamesPlayed = 0,
+			bossesDefeated = 0,
 		},
 		lastLoginDay = 0,
 		loginStreak = 0,
