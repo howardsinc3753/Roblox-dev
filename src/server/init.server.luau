@@ -22,6 +22,7 @@ local LairBuilder = require(script.LairBuilder)
 local ZoneManager = require(script.ZoneManager)
 local DragonProgression = require(script.DragonProgression)
 local Analytics = require(script.Analytics)
+local BossManager = require(script.BossManager)
 local CollectionService = game:GetService("CollectionService")
 
 -- Disable Roblox's default character auto-spawn. Without this, Roblox
@@ -107,6 +108,9 @@ local upgradeStatRemote = getRemote("UpgradeStat")
 local dragonStatsUpdatedRemote = getRemote("DragonStatsUpdated")
 local dummyHitRemote = getRemote("DummyHit")
 local markLairTutorialSeenRemote = getRemote("MarkLairTutorialSeen")
+local bossTelegraphRemote = getRemote("BossTelegraph")
+local bossMusicStateRemote = getRemote("BossMusicState")
+local bossBannerStateRemote = getRemote("BossBannerState")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 
 -- ================================
@@ -601,6 +605,28 @@ fireBreathRemote.OnServerEvent:Connect(function(player: Player, origin: unknown,
 			-- don't get spammed with hit sounds for someone else's combat.
 			damageNPCRemote:FireClient(player, hitNpc.model, npcFalloffDmg)
 		end)
+		return
+	end
+
+	-- Sprint 10: no NPC hit either — check the active Mega Boss. Same
+	-- cone parameters as findHitNPC (dot 0.85 ~ 30deg, range 100). Boss
+	-- damage uses state.damage with the same distance falloff so Atk
+	-- upgrades flow through to boss DPS. Damage routes to BossManager
+	-- (separate state from NPCManager) which tracks per-player
+	-- contribution for the commit-5 reward share.
+	local hitBoss = BossManager.tryHitWithCone(origin :: Vector3, direction :: Vector3, 0.85, 100)
+	if hitBoss then
+		CombatManager.recordDamageDealt(player)
+		local bossDist = (hitBoss.rootPart.Position - origin :: Vector3).Magnitude
+		local bossFalloffDmg = math.floor(state.damage * CombatManager.distanceFalloff(bossDist))
+		local bossTravelTime = math.min(bossDist / PROJECTILE_SPEED, TRAVEL_CAP)
+		task.delay(bossTravelTime, function()
+			if not hitBoss.model or not hitBoss.model.Parent then return end
+			BossManager.applyDamage(bossFalloffDmg, player.UserId)
+			-- Reuse the DamageNPC remote for visual feedback — client
+			-- already renders floating "-N" + Hit sound for any model.
+			damageNPCRemote:FireClient(player, hitBoss.model, bossFalloffDmg)
+		end)
 	end
 end)
 
@@ -682,6 +708,15 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 			damageNPCRemote:FireClient(player, npc.model, fireDmg)
 		end
 
+		-- Sprint 10: the Fire vortex also hits Blaze if he's in the cone.
+		-- Single-target add since there's only ever one Mega Boss.
+		local fireBoss = BossManager.tryHitWithCone(pos, forward, FIRE_CONE_DOT, FIRE_CONE_RANGE)
+		if fireBoss then
+			CombatManager.recordDamageDealt(player)
+			BossManager.applyDamage(fireDmg, player.UserId)
+			damageNPCRemote:FireClient(player, fireBoss.model, fireDmg)
+		end
+
 		-- 4th arg = direction. Client renders the vortex VFX as a forward cone.
 		specialEffectRemote:FireAllClients(player.UserId, "Fire", pos, forward)
 
@@ -734,6 +769,18 @@ useSpecialRemote.OnServerEvent:Connect(function(player: Player, clientDirection:
 				-- Sprint 7: same upgrade-aware specialDamage source for NPC chain hits.
 				NPCManager.applyDamage(npc.id, state.specialDamage, player.UserId)
 				damageNPCRemote:FireClient(player, npc.model, state.specialDamage)
+			end
+		end
+
+		-- Sprint 10: chain can also fork to Blaze if there are slots
+		-- left. Treats him as one chain target (not multiple — the
+		-- chain is breadth, not concentrated burst).
+		if hitCount < 3 then
+			local lightningBoss = BossManager.tryHitWithCone(pos, forward, LIGHTNING_CONE_DOT, LIGHTNING_CONE_RANGE)
+			if lightningBoss then
+				CombatManager.recordDamageDealt(player)
+				BossManager.applyDamage(state.specialDamage, player.UserId)
+				damageNPCRemote:FireClient(player, lightningBoss.model, state.specialDamage)
 			end
 		end
 
@@ -1085,6 +1132,26 @@ end)
 -- here — RoundManager's onActivePhase callback (above) drives waves
 -- per-round via NPCManager.runWaveSequence.
 NPCManager.startAILoop(npcDamagePlayer, RoundManager.isActive)
+
+-- Sprint 10: BossManager AI tick callbacks. damageCallback reuses
+-- npcDamagePlayer so boss attacks flow through the same path as
+-- regular NPC damage (CombatManager.applyDamage, KO handling,
+-- respawn timing) — keeps boss-vs-player damage consistent with
+-- everything else. telegraphCallback fires the BossTelegraph remote
+-- to all clients so the BossTelegraph.luau client renderer can draw
+-- the slam circle / beam preview.
+BossManager.setDamageCallback(function(target: Player, damage: number, source: Vector3)
+	-- Lair-hider gate (defense-in-depth): a kid sitting in the Lair
+	-- when Blaze swings shouldn't take damage. Sprint 5 Part D's
+	-- CombatManager.applyDamage already refuses Lair targets, but
+	-- explicit-here means we skip the per-attack damage broadcast
+	-- entirely instead of doing the work and discarding the result.
+	if ZoneManager.isPlayerInLair(target) then return end
+	npcDamagePlayer(target, damage, source, nil, nil)
+end)
+BossManager.setTelegraphCallback(function(attackType: string, originPos: Vector3, directionOrRadius: Vector3, windupSec: number)
+	bossTelegraphRemote:FireAllClients(attackType, originPos, directionOrRadius, windupSec)
+end)
 
 -- ================================
 -- Sprint 5 Part E: PORTAL TELEPORTS

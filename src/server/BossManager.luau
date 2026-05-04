@@ -288,4 +288,174 @@ end
 -- the simple "Players:GetPlayerByUserId returns nil → skip" pattern in
 -- commit 5 handles it implicitly.
 
+-- ===== Sprint 10 commit 4: combat hit detection + AI tick =====
+
+-- Cone hit detection against the active boss. Mirrors the
+-- CombatManager.findHitNPC pattern so player breath and cone specials
+-- can route damage to Blaze using the same cone-test logic. Returns
+-- the active BossState if the cone hits, nil otherwise.
+-- Caller is responsible for applying damage via BossManager.applyDamage.
+function BossManager.tryHitWithCone(origin: Vector3, direction: Vector3, dotThreshold: number, range: number): BossState?
+	if not activeBoss or not activeBoss.alive then return nil end
+	if direction.Magnitude < 0.001 then return nil end
+	local toBoss = activeBoss.rootPart.Position - origin
+	local dist = toBoss.Magnitude
+	if dist > range then return nil end
+	if dist < 0.001 then return activeBoss end -- inside boss hitbox
+	local dot = toBoss.Unit:Dot(direction.Unit)
+	if dot < dotThreshold then return nil end
+	return activeBoss
+end
+
+-- Callbacks set by init.server.luau at startup. The boss AI tick uses
+-- them to deal damage to players + fire telegraph remotes. Set-once
+-- pattern so every spawn doesn't re-wire the callbacks.
+local damageCallback: ((target: Player, damage: number, source: Vector3) -> ())? = nil
+local telegraphCallback: ((attackType: string, originPos: Vector3, directionOrRadius: Vector3, windupSec: number) -> ())? = nil
+
+function BossManager.setDamageCallback(cb: (target: Player, damage: number, source: Vector3) -> ())
+	damageCallback = cb
+end
+
+function BossManager.setTelegraphCallback(cb: (attackType: string, originPos: Vector3, directionOrRadius: Vector3, windupSec: number) -> ())
+	telegraphCallback = cb
+end
+
+-- Attack tunables. Two attacks alternate via random selection; each
+-- has its own windup window (peer audit: 1.8s for Slam, 1.5s for Beam
+-- — kids on Xbox controllers need 1.5-2s to react). Range/damage from
+-- the EnemyConfig.Blaze entry where applicable; Slam radius and Beam
+-- length live here because they're attack-specific, not boss-specific.
+local SLAM_RADIUS = 30 -- studs
+local SLAM_DAMAGE = 35
+local SLAM_WINDUP = 1.8
+
+local BEAM_LENGTH = 80
+local BEAM_HITBOX_WIDTH = 3 -- tighter than the visual telegraph (4) so dodging feels fair
+local BEAM_DAMAGE = 30
+local BEAM_WINDUP = 1.5
+
+local ATTACK_INTERVAL = 5 -- seconds between attack starts
+
+-- Find a random alive player who is in the Arena (not in the Lair) to
+-- target. Returns nil if no valid targets — boss idles for the next
+-- attack interval rather than firing into empty space.
+local function pickRandomArenaTarget(): Player?
+	local candidates: { Player } = {}
+	-- ZoneManager check kept loose: we don't require the local
+	-- BossManager to know about ZoneManager; init.server.luau's
+	-- damageCallback (npcDamagePlayer) already filters out Lair players
+	-- via the existing Sprint 5 Part D path. Candidates here are just
+	-- alive players with a character.
+	for _, p in Players:GetPlayers() do
+		if p.Character and p.Character.PrimaryPart then
+			local hum = p.Character:FindFirstChildOfClass("Humanoid")
+			if hum and hum.Health > 0 then
+				table.insert(candidates, p)
+			end
+		end
+	end
+	if #candidates == 0 then return nil end
+	return candidates[math.random(1, #candidates)]
+end
+
+-- Inferno Slam attack execution. Picks a target's current position,
+-- fires the telegraph, waits the windup, then applies damage to anyone
+-- in the slam radius of the locked-in position. Doesn't track the
+-- target after the telegraph fires — kids dodge by leaving the circle.
+local function executeInfernoSlam(state: BossState)
+	local target = pickRandomArenaTarget()
+	if not target or not target.Character or not target.Character.PrimaryPart then return end
+	local lockedPos = target.Character.PrimaryPart.Position
+
+	if telegraphCallback then
+		-- Pack radius into directionOrRadius.X per the BossTelegraph
+		-- remote contract (commit 2).
+		telegraphCallback("InfernoSlam", lockedPos, Vector3.new(SLAM_RADIUS, 0, 0), SLAM_WINDUP)
+	end
+	task.wait(SLAM_WINDUP)
+	if not state.alive then return end -- boss died mid-windup, abort
+
+	-- Apply damage to anyone within SLAM_RADIUS of the locked position.
+	-- The "locked-in" semantics are intentional — kids must MOVE to
+	-- dodge, not just be elsewhere when the timer ends.
+	for _, p in Players:GetPlayers() do
+		if p.Character and p.Character.PrimaryPart then
+			local dist = (p.Character.PrimaryPart.Position - lockedPos).Magnitude
+			if dist <= SLAM_RADIUS and damageCallback then
+				damageCallback(p, SLAM_DAMAGE, state.rootPart.Position)
+			end
+		end
+	end
+end
+
+-- Magma Beam attack execution. Fires from boss → target's current
+-- position. Direction is locked at telegraph time; kids dodge sideways.
+-- Hitbox is a thin rectangular volume of length BEAM_LENGTH from boss
+-- along the direction unit vector.
+local function executeMagmaBeam(state: BossState)
+	local target = pickRandomArenaTarget()
+	if not target or not target.Character or not target.Character.PrimaryPart then return end
+	local bossPos = state.rootPart.Position
+	local targetPos = target.Character.PrimaryPart.Position
+	local toTarget = targetPos - bossPos
+	if toTarget.Magnitude < 0.1 then return end
+	local direction = toTarget.Unit
+
+	if telegraphCallback then
+		telegraphCallback("MagmaBeam", bossPos, direction, BEAM_WINDUP)
+	end
+	task.wait(BEAM_WINDUP)
+	if not state.alive then return end
+
+	-- Hitbox: anyone whose projection onto the beam axis is in
+	-- [0, BEAM_LENGTH] AND whose perpendicular distance from the axis
+	-- is within BEAM_HITBOX_WIDTH. Standard "point in oriented box"
+	-- decomposition into axis-aligned tests via dot product.
+	for _, p in Players:GetPlayers() do
+		if p.Character and p.Character.PrimaryPart then
+			local toPlayer = p.Character.PrimaryPart.Position - bossPos
+			local distAlongBeam = toPlayer:Dot(direction)
+			if distAlongBeam > 0 and distAlongBeam < BEAM_LENGTH then
+				local perpVec = toPlayer - direction * distAlongBeam
+				if perpVec.Magnitude < BEAM_HITBOX_WIDTH and damageCallback then
+					damageCallback(p, BEAM_DAMAGE, bossPos)
+				end
+			end
+		end
+	end
+end
+
+-- AI tick. Runs as a coroutine started from spawnBlaze. Loops while
+-- the boss is alive AND is the currently-active boss (the activeBoss
+-- == state guard catches the rare race where despawn() ran but the
+-- coroutine hasn't seen it yet). Picks a random attack each interval.
+local function runBossAITick(state: BossState)
+	-- Brief pause before first attack so kids have time to react to
+	-- the boss appearing before getting blasted. Same purpose as the
+	-- 3-second wave-INCOMING window in the standard wave loop.
+	task.wait(3)
+	while activeBoss == state and state.alive do
+		local attack = if math.random() < 0.5 then "Slam" else "Beam"
+		if attack == "Slam" then
+			executeInfernoSlam(state)
+		else
+			executeMagmaBeam(state)
+		end
+		task.wait(ATTACK_INTERVAL)
+	end
+end
+
+-- Hook spawnBlaze to start the AI tick. We do this by wrapping the
+-- existing function rather than mutating its body — keeps the spawn
+-- bookkeeping in one place and the AI in another.
+local originalSpawnBlaze = BossManager.spawnBlaze
+function BossManager.spawnBlaze(playerCount: number): BossState?
+	local state = originalSpawnBlaze(playerCount)
+	if state then
+		task.spawn(runBossAITick, state)
+	end
+	return state
+end
+
 return BossManager
