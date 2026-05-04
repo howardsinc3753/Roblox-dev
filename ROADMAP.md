@@ -106,11 +106,32 @@ The foundation. Without this nothing else works.
 - PvP disabled in Lair (zone check in fireBreath handler)
 - Visual indicator: "Safe Zone" label when in Lair
 
-### Sprint 6 — Wave Structure with Rests (~3-4 hours)
-- Refactor NPCManager wave loop: 3 waves with 15s breaks between
-- Visual countdown UI: "Wave 2 starts in 15s"
-- Round-end summary shows wave-by-wave breakdown
-- Fewer NPCs total, but punchier waves with rest
+### Sprint 6 — Wave Structure with Rests (~5-7 hours) ✅ shipped
+
+Use case: kids were burning out in 2-minute continuous-chaos rounds.
+Replaced with a fight → rest → fight rhythm so adrenaline drops between
+beats and kids feel structured progress.
+
+- ✅ NPCManager: `runWaveSequence` state machine (INCOMING → ACTIVE →
+  CLEARED/TIMEOUT → RESTING) replaces the old continuous wave spawn loop.
+  Three waves per round: easy (3 scouts), medium (4 scouts + warrior),
+  boss (1 boss + 2 scouts). 90s wave timeout, 15s rest between, 240s
+  round safety cap.
+- ✅ RoundManager: dropped the strict 120s round duration. Round length
+  is now wave-driven; safety cap counts down in the background. Three-
+  callback API (`onRoundStart`, `onActivePhase`, `onRoundEnd`).
+- ✅ Per-wave coin payout (30 / 50 / 100) to all players who are alive
+  AND in the Arena when each wave clears — Lair-hiders skip the bonus.
+- ✅ Client `WaveTracker.luau`: top-center state-aware pill (incoming
+  banner / enemy counter / clear flash / countdown). Self-contained
+  ScreenGui (HUD-isolation pattern from Sprint 5).
+- ✅ Round-end summary: per-wave breakdown row ("✅ W1 22s · ⏱️ W2 — ·
+  ✅ Boss 35s") so kids see exactly how far they got.
+- ✅ First-rest "💡 Tip: portal to your Lair to catch your breath!"
+  subtitle, once-per-session.
+- ✅ HUD round-timer repurposed to "Round N" — WaveTracker is now the
+  canonical round-progress UI; the safety-cap clock isn't surfaced to
+  avoid misleading the kid with a 240s number.
 
 ### Sprint 7 — Dragon Progression UI in Lair (~10-12 hours)
 - Stat board: see your dragon's level, XP bar, current stats
@@ -180,13 +201,28 @@ Arena (needs ZoneManager Part C).
 
 ### Next concrete sprint actions
 
-1. **QA the Lair safe zone**: F5 in Studio, spawn in Lair, confirm:
+1. **QA Sprint 5 Lair safe zone** (still pending):
    - "🏠 SAFE ZONE" pill visible top-center while standing in the Lair
    - LMB/Special/Shield keys do nothing in the Lair (no cooldown burned)
    - Portal to Arena → pill disappears, combat works
-   - Return portal → pill reappears, combat goes back to no-op
-   - NPC at the edge of Arena does NOT chase a player who hovers near the Lair-Arena boundary on the Lair side
-2. **Move to Sprint 6** (wave rest structure) or **Sprint 7** (dragon progression UI in Lair) — whichever the QA playtest reveals as more urgent. Sprint 5 closes after the QA above passes.
+   - NPC at the edge of Arena does NOT chase a Lair-side player
+
+2. **QA Sprint 6 wave rhythm**:
+   - Round starts → "WAVE 1 INCOMING" banner, 3-second telegraph
+   - Spawn 3 Scouts; "Wave 1 — N / 3 enemies" counter ticks down on kills
+   - All Scouts dead → green flash + "✅ WAVE 1 CLEAR! +30 coins"
+   - "Wave 2 starts in 15s..." countdown, first-time tip "💡 portal to Lair" appears
+   - Wave 2 = 4 Scouts + 1 Warrior, +50 on clear
+   - Wave 3 = "⚠️ BOSS WAVE INCOMING ⚠️", Boss + 2 Scouts, +100 on clear
+   - Round-end summary shows wave-by-wave row "✅ W1 · ✅ W2 · ✅ Boss"
+   - Lair-hider during a wave: does NOT receive the wave-clear coin bonus
+   - Portal to Lair mid-wave: NPCs lose target instantly (Sprint 5 Part D)
+   - Wave 3 cleared early → round ends within ~2 seconds (no 120s timer wait)
+
+3. **After QA**: Sprint 7 (Dragon Progression UI in Lair — stat upgrades,
+   practice dummies become functional) or Sprint 8 (FTUE for first-ever
+   joiners). The Lair tip in Sprint 6 promises stat upgrades; Sprint 7
+   delivers them.
 
 ---
 

@@ -15,6 +15,12 @@ local screenGui: ScreenGui
 local winnerLabel: TextLabel
 local leaderboardFrame: Frame
 local personalStatsLabel: TextLabel
+-- Sprint 6: wave breakdown row. Renders a compact line like
+-- "✅ W1 22s · ✅ W2 31s · ❌ W3 timeout" so kids see exactly how
+-- far they got. Hidden if the round-end payload doesn't include
+-- wave results (e.g. older server build).
+local waveBreakdownLabel: TextLabel
+local waveHeaderLabel: TextLabel
 
 local DISPLAY_DURATION = 6 -- seconds; intermission is 15s, then Dragon Select takes over
 
@@ -34,9 +40,11 @@ function RoundEndSummary.create()
 	backdrop.BorderSizePixel = 0
 	backdrop.Parent = screenGui
 
-	-- Centered card panel
+	-- Centered card panel. Sprint 6 added the wave breakdown row, so the
+	-- card is now slightly taller (440 instead of 400) to fit between the
+	-- leaderboard and the personal-stats footer without crowding.
 	local card = Instance.new("Frame")
-	card.Size = UDim2.fromOffset(500, 400)
+	card.Size = UDim2.fromOffset(500, 440)
 	card.AnchorPoint = Vector2.new(0.5, 0.5)
 	card.Position = UDim2.fromScale(0.5, 0.5)
 	card.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
@@ -105,6 +113,40 @@ function RoundEndSummary.create()
 	lbLayout.SortOrder = Enum.SortOrder.LayoutOrder
 	lbLayout.Padding = UDim.new(0, 4)
 	lbLayout.Parent = leaderboardFrame
+
+	-- Sprint 6: per-wave breakdown row. Compact one-line summary of how
+	-- the round went wave-by-wave. Sits between the leaderboard and the
+	-- personal-stats footer. Hidden if no wave results were sent (e.g.
+	-- pre-Sprint-6 server build).
+	waveHeaderLabel = Instance.new("TextLabel")
+	waveHeaderLabel.Size = UDim2.new(1, -40, 0, 22)
+	waveHeaderLabel.Position = UDim2.fromOffset(20, 285)
+	waveHeaderLabel.BackgroundTransparency = 1
+	waveHeaderLabel.Text = "WAVES"
+	waveHeaderLabel.TextColor3 = Color3.fromRGB(180, 180, 200)
+	waveHeaderLabel.Font = Enum.Font.GothamBold
+	waveHeaderLabel.TextSize = 14
+	waveHeaderLabel.TextXAlignment = Enum.TextXAlignment.Left
+	waveHeaderLabel.Name = "WaveHeader"
+	waveHeaderLabel.Visible = false
+	waveHeaderLabel.Parent = card
+
+	waveBreakdownLabel = Instance.new("TextLabel")
+	waveBreakdownLabel.Name = "WaveBreakdown"
+	waveBreakdownLabel.Size = UDim2.new(1, -40, 0, 30)
+	waveBreakdownLabel.Position = UDim2.fromOffset(20, 308)
+	waveBreakdownLabel.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+	waveBreakdownLabel.BackgroundTransparency = 0.4
+	waveBreakdownLabel.Text = ""
+	waveBreakdownLabel.TextColor3 = Color3.fromRGB(220, 220, 235)
+	waveBreakdownLabel.Font = Enum.Font.GothamBold
+	waveBreakdownLabel.TextSize = 15
+	waveBreakdownLabel.Visible = false
+	waveBreakdownLabel.Parent = card
+
+	local waveCorner = Instance.new("UICorner")
+	waveCorner.CornerRadius = UDim.new(0, 6)
+	waveCorner.Parent = waveBreakdownLabel
 
 	-- Personal stats footer
 	personalStatsLabel = Instance.new("TextLabel")
@@ -189,11 +231,15 @@ end
 -- firstWinClaimed: { [userId]: boolean } true if THIS player just claimed their
 --   first-win-of-day bonus this round. Lets the local player see a gold
 --   "FIRST WIN TODAY +50" line as the daily-bonus payoff moment.
+-- waveResults (Sprint 6): { { waveNum, status, clearTime?, isBossWave }, ... }
+--   per-wave breakdown row. Optional — pre-Sprint-6 servers don't send it
+--   and the row stays hidden in that case.
 function RoundEndSummary.show(
 	winnerUserId: number,
 	scoreboard: { any },
 	coinsEarned: { [number]: number }?,
-	firstWinClaimed: { [number]: boolean }?
+	firstWinClaimed: { [number]: boolean }?,
+	waveResults: { any }?
 )
 	if not screenGui then return end
 
@@ -218,6 +264,26 @@ function RoundEndSummary.show(
 	for i = 1, math.min(3, #scoreboard) do
 		local entry = scoreboard[i]
 		addLeaderboardRow(i, entry.name, entry.kills, entry.deaths)
+	end
+
+	-- Sprint 6: wave breakdown row. Compact "✅ W1 22s · ⏱️ W2 — · ✅ Boss 35s"
+	-- so the kid sees how far they got. Each entry is prefixed by status:
+	-- ✅ for CLEARED, ⏱️ for TIMEOUT, — for ABORTED.
+	if waveResults and #waveResults > 0 and waveBreakdownLabel then
+		local parts: { string } = {}
+		for _, r in waveResults do
+			local prefix = if r.status == "CLEARED" then "✅" elseif r.status == "TIMEOUT" then "⏱️" else "—"
+			local time = if r.clearTime then `{math.floor(r.clearTime)}s` else "—"
+			local label = if r.isBossWave then `{prefix} Boss {time}` else `{prefix} W{r.waveNum} {time}`
+			table.insert(parts, label)
+		end
+		waveBreakdownLabel.Text = table.concat(parts, "    ·    ")
+		waveBreakdownLabel.TextXAlignment = Enum.TextXAlignment.Center
+		waveBreakdownLabel.Visible = true
+		if waveHeaderLabel then waveHeaderLabel.Visible = true end
+	elseif waveBreakdownLabel then
+		waveBreakdownLabel.Visible = false
+		if waveHeaderLabel then waveHeaderLabel.Visible = false end
 	end
 
 	-- Personal stats

@@ -32,6 +32,7 @@ local MobileControls = require(script.MobileControls)
 local ControlsOverlay = require(script.ControlsOverlay)
 local TipManager = require(script.TipManager)
 local SafeZoneIndicator = require(script.SafeZoneIndicator)
+local WaveTracker = require(script.WaveTracker)
 
 print(`[Client] {player.Name} Dragon Warz client starting...`)
 
@@ -51,6 +52,9 @@ MobileControls.init()
 -- Sprint 5 Part C/D: "🏠 SAFE ZONE" pill while Player.Zone == Lair.
 -- Reads ZoneManager's per-player attribute; no remote subscription needed.
 SafeZoneIndicator.init()
+-- Sprint 6: wave-state HUD (incoming banner / counter / countdown).
+-- Self-contained ScreenGui so a syntax error here can't take HUD down.
+WaveTracker.init()
 
 -- Fetch initial player data so DragonSelectUI knows what's unlocked + selected.
 -- The server creates the GetPlayerData RemoteFunction in NetworkSetup; it returns
@@ -378,11 +382,13 @@ playerKORemote.OnClientEvent:Connect(function(killerUserId: number, victimUserId
 	end
 end)
 
--- Round start: hide dragon select, return mouse to lock-center for combat
-local roundTimeRemaining = 0
-roundStartRemote.OnClientEvent:Connect(function(roundNumber: number, duration: number)
-	roundTimeRemaining = duration
-	HUD.updateRoundTimer(`Round {roundNumber} - {duration}s`)
+-- Round start: hide dragon select, return mouse to lock-center for combat.
+-- Sprint 6: the HUD round-timer no longer ticks down — WaveTracker is the
+-- canonical round-progress UI now (wave incoming/active/clear/resting).
+-- We just show "Round N" so the HUD still reflects round state, without
+-- presenting the safety-cap (240s) clock as if it were a meaningful timer.
+roundStartRemote.OnClientEvent:Connect(function(roundNumber: number, _duration: number)
+	HUD.updateRoundTimer(`Round {roundNumber}`)
 	SoundManager.play("RoundStart")
 	DragonSelectUI.hide()
 	FlightController.enable()
@@ -395,7 +401,9 @@ end)
 -- 4th arg `firstWinClaimed` is { [userId]: true } for players who just claimed
 -- their first-win-of-day bonus this round. Drives the gold "FIRST WIN TODAY"
 -- highlight in the summary card.
-roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: any, coinsEarned: any, firstWinClaimed: any)
+-- 5th arg `waveResults` (Sprint 6): { { waveNum, status, clearTime, isBossWave } }
+-- per-wave breakdown for the recap row. Optional — pre-Sprint-6 servers omit it.
+roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: any, coinsEarned: any, firstWinClaimed: any, waveResults: any)
 	local winner = Players:GetPlayerByUserId(winnerUserId)
 	local winnerName = if winner then winner.Name else "No one"
 	HUD.updateRoundTimer(`Round Over! Winner: {winnerName}`)
@@ -406,15 +414,19 @@ roundEndRemote.OnClientEvent:Connect(function(winnerUserId: number, scoreboard: 
 
 	-- Show summary first (auto-dismisses after ~6s), then open dragon select
 	-- for the remaining intermission time.
-	RoundEndSummary.show(winnerUserId, scoreboard, coinsEarned, firstWinClaimed)
+	RoundEndSummary.show(winnerUserId, scoreboard, coinsEarned, firstWinClaimed, waveResults)
 	task.delay(6, function()
 		DragonSelectUI.show(9) -- ~9s left of the 15s intermission after summary
 	end)
 end)
 
--- Timer sync from server
-syncTimerRemote.OnClientEvent:Connect(function(timeRemaining: number, roundNumber: number)
-	roundTimeRemaining = timeRemaining
+-- Sprint 6: SyncTimer is now meaningless on the client — round duration
+-- is wave-driven, not a fixed countdown. Kept the remote subscription as
+-- a no-op stub so the server's existing periodic fire doesn't generate
+-- "no listener" warnings; if SyncTimer is removed server-side later this
+-- block can go too.
+syncTimerRemote.OnClientEvent:Connect(function(_timeRemaining: number, _roundNumber: number)
+	-- intentionally empty
 end)
 
 -- Special ability visual effects. 4th arg `direction` is the dragon's facing
@@ -736,11 +748,10 @@ RunService.Heartbeat:Connect(function(dt: number)
 		CombatInput.getShieldCooldownPercent()
 	)
 
-	-- Update round timer
-	if roundTimeRemaining > 0 then
-		roundTimeRemaining = math.max(0, roundTimeRemaining - dt)
-		HUD.updateRoundTimer(`Time: {math.floor(roundTimeRemaining)}s`)
-	end
+	-- Sprint 6: round-timer text is now set by RoundStart (`Round N`) and
+	-- RoundEnd (`Round Over!`). No per-frame decrement — the active round
+	-- length is wave-driven, not a fixed clock, so a ticking number would
+	-- mislead. WaveTracker is the canonical round-progress UI.
 
 	-- Compass: project off-screen players + NPCs to the screen edge as arrows
 	-- so the player always knows where to look for action. Cheap (~10 entities

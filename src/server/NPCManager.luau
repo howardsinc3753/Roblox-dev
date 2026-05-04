@@ -50,16 +50,37 @@ local npcs: { [number]: NPCState } = {}
 local nextNpcId = 1
 local AI_TICK_RATE = 0.2 -- seconds; 5Hz AI updates (smooth enough to feel reactive, cheap)
 
--- Wave configuration. Each wave defines what to spawn and the delay before
--- the next wave. Indexed by wave number; loops back to the last entry once
--- the round runs out of defined waves (so longer rounds keep getting harder).
-local WAVES = {
-	{ scouts = 2, warriors = 0, bosses = 0, delayAfter = 30 }, -- wave 1: scouts only
-	{ scouts = 3, warriors = 1, bosses = 0, delayAfter = 30 }, -- wave 2: warrior intro
-	{ scouts = 4, warriors = 2, bosses = 0, delayAfter = 30 }, -- wave 3: more warriors
-	{ scouts = 3, warriors = 3, bosses = 1, delayAfter = 40 }, -- wave 4: first boss
-	{ scouts = 5, warriors = 4, bosses = 1, delayAfter = 40 }, -- wave 5+: chaos
+-- Sprint 6: 3-wave structure with rest periods. Replaces the old
+-- continuous-spawn loop. Each round has exactly three waves:
+--   1. Easy onramp (scouts only) — kids learn the controls
+--   2. Medium (scouts + warrior) — teaches them about tougher enemies
+--   3. Boss + minions — climactic moment, the round ends right here
+-- Why three waves: rest periods (15s between) give the kid a breather,
+-- and three is enough beats to feel structure without dragging.
+local WAVE_DEFS = {
+	{ scouts = 3, warriors = 0, bosses = 0, isBoss = false, coinReward = 30 }, -- wave 1: easy
+	{ scouts = 4, warriors = 1, bosses = 0, isBoss = false, coinReward = 50 }, -- wave 2: medium
+	{ scouts = 2, warriors = 0, bosses = 1, isBoss = true,  coinReward = 100 }, -- wave 3: boss
 }
+
+local NUM_WAVES = #WAVE_DEFS
+
+-- Wave-flow timings. INCOMING is the telegraph window where the banner
+-- shows but no enemies have spawned yet — gives the kid 3 seconds to
+-- mentally prepare. WAVE_TIMEOUT is the safety cap: if the kid can't
+-- (or won't) kill all the NPCs in 90 seconds the wave force-ends so
+-- the round can advance. REST_DURATION is the breather between waves.
+local WAVE_INCOMING_DURATION = 3
+local WAVE_TIMEOUT = 90
+local REST_DURATION = 15
+local WAVE_TICK_RATE = 0.5 -- how often to broadcast enemiesLeft updates during ACTIVE
+
+-- Wave state strings — match the union the client switches on.
+local STATE_INCOMING = "INCOMING"
+local STATE_ACTIVE = "ACTIVE"
+local STATE_CLEARED = "CLEARED"
+local STATE_TIMEOUT = "TIMEOUT"
+local STATE_RESTING = "RESTING"
 
 -- Soft cap on simultaneous NPCs. Past this, new spawns are skipped to keep
 -- server perf reasonable. Bosses count toward this same cap.
@@ -594,50 +615,157 @@ function NPCManager.startAILoop(
 	end)
 end
 
--- Wave system: spawns scaling waves over the round.
--- Driven by the round's active state from RoundManager.
-function NPCManager.startWaveLoop(isRoundActive: () -> boolean)
-	task.spawn(function()
-		while true do
-			-- Wait for a round to be active before spawning waves
-			while not isRoundActive() do
-				task.wait(2)
+-- Sprint 6: structured wave sequence. Replaces the old startWaveLoop's
+-- continuous chaos with a deterministic 3-wave rhythm.
+--
+-- Per round, this runs ONCE: wave 1 → rest → wave 2 → rest → wave 3
+-- → done. Returns to the caller (RoundManager) when the sequence is
+-- complete so the round-end flow can fire the summary etc.
+--
+-- State machine per wave:
+--   INCOMING  — 3-second telegraph (banner shown, no spawns yet)
+--   ACTIVE    — NPCs spawned, fighting; broadcast enemiesLeft on every kill
+--   CLEARED   — all NPCs killed within timeout; pay coin reward
+--   TIMEOUT   — 90s hit with NPCs still alive; force-clear, no bonus
+--   RESTING   — 15s breather (skipped after the boss wave; round ends)
+--
+-- Callers pass three callbacks:
+--   fireWaveState(waveNum, state, payload)  — broadcast UI signal
+--   isRoundActive()                          — bail-out check
+--   onWaveCleared(waveNum, coinReward)       — per-wave reward distribution
+--
+-- Returns the per-wave breakdown table for the round-end summary:
+--   { { waveNum = 1, status = "CLEARED", clearTime = 22.4 }, ... }
+
+-- Per-wave result, passed back to RoundManager → roundEndRemote so the
+-- end-of-round summary can render a wave-by-wave breakdown row.
+export type WaveResult = {
+	waveNum: number,
+	status: string, -- "CLEARED" | "TIMEOUT" | "ABORTED"
+	clearTime: number?, -- nil for TIMEOUT/ABORTED
+	isBossWave: boolean,
+}
+
+-- Internal: spawn the NPCs for a wave. Each spawn checks isRoundActive
+-- so a mid-spawn round-end doesn't waste InsertService calls.
+local function spawnWaveNPCs(waveDef: any, isRoundActive: () -> boolean)
+	for _ = 1, waveDef.scouts do
+		if not isRoundActive() then return end
+		NPCManager.spawn("Scout")
+		task.wait(0.3)
+	end
+	for _ = 1, waveDef.warriors do
+		if not isRoundActive() then return end
+		NPCManager.spawn("Warrior")
+		task.wait(0.5)
+	end
+	for _ = 1, waveDef.bosses do
+		if not isRoundActive() then return end
+		NPCManager.spawn("Boss")
+		task.wait(0.8)
+	end
+end
+
+-- Internal: count alive NPCs cheaply (no allocation). Used in the ACTIVE
+-- phase polling loop to decide when the wave is cleared.
+local function countAliveNPCs(): number
+	local n = 0
+	for _, state in npcs do
+		if state.alive then n += 1 end
+	end
+	return n
+end
+
+function NPCManager.runWaveSequence(
+	fireWaveState: (waveNum: number, state: string, payload: any) -> (),
+	isRoundActive: () -> boolean,
+	onWaveCleared: (waveNum: number, coinReward: number) -> ()
+): { WaveResult }
+	local results: { WaveResult } = {}
+
+	for waveNum = 1, NUM_WAVES do
+		if not isRoundActive() then
+			table.insert(results, { waveNum = waveNum, status = "ABORTED", clearTime = nil, isBossWave = WAVE_DEFS[waveNum].isBoss })
+			break
+		end
+
+		local waveDef = WAVE_DEFS[waveNum]
+		print(`[NPCManager] Wave {waveNum} INCOMING (boss={waveDef.isBoss})`)
+
+		-- INCOMING: telegraph window. Client shows "WAVE X INCOMING" banner
+		-- so the kid has 3 seconds to position before NPCs appear.
+		fireWaveState(waveNum, STATE_INCOMING, { isBossWave = waveDef.isBoss })
+		for _ = 1, WAVE_INCOMING_DURATION do
+			if not isRoundActive() then break end
+			task.wait(1)
+		end
+		if not isRoundActive() then
+			table.insert(results, { waveNum = waveNum, status = "ABORTED", clearTime = nil, isBossWave = waveDef.isBoss })
+			break
+		end
+
+		-- SPAWN + ACTIVE: kick off the NPCs (concurrent with ACTIVE state)
+		-- and broadcast the initial enemy count. The ACTIVE loop polls every
+		-- WAVE_TICK_RATE seconds and re-broadcasts so the client counter ticks
+		-- down without needing per-kill remotes.
+		local totalEnemies = waveDef.scouts + waveDef.warriors + waveDef.bosses
+		fireWaveState(waveNum, STATE_ACTIVE, { enemiesLeft = totalEnemies, totalEnemies = totalEnemies, isBossWave = waveDef.isBoss })
+		task.spawn(spawnWaveNPCs, waveDef, isRoundActive)
+
+		local startTime = tick()
+		local timedOut = false
+		while isRoundActive() do
+			task.wait(WAVE_TICK_RATE)
+			local elapsed = tick() - startTime
+			local alive = countAliveNPCs()
+			fireWaveState(waveNum, STATE_ACTIVE, { enemiesLeft = alive, totalEnemies = totalEnemies, isBossWave = waveDef.isBoss })
+			-- Wave cleared: every NPC has been killed AND the spawn task is
+			-- past the initial spawn-stagger window so we don't false-clear
+			-- before the warriors/bosses have spawned.
+			if alive == 0 and elapsed > 2 then
+				break
 			end
-
-			local waveNum = 1
-			while isRoundActive() do
-				-- Index into WAVES; clamp to last entry so long rounds keep peak difficulty
-				local wave = WAVES[math.min(waveNum, #WAVES)]
-				print(`[NPCManager] Spawning wave {waveNum}: {wave.scouts}S {wave.warriors}W {wave.bosses}B`)
-
-				-- M2 fix: each spawn loop checks isRoundActive so a mid-wave
-				-- round-end doesn't burn InsertService calls + immediate cleanup.
-				for i = 1, wave.scouts do
-					if not isRoundActive() then break end
-					NPCManager.spawn("Scout")
-					task.wait(0.3)
-				end
-				for i = 1, wave.warriors do
-					if not isRoundActive() then break end
-					NPCManager.spawn("Warrior")
-					task.wait(0.5)
-				end
-				for i = 1, wave.bosses do
-					if not isRoundActive() then break end
-					NPCManager.spawn("Boss")
-					task.wait(0.8)
-				end
-
-				task.wait(wave.delayAfter)
-				waveNum += 1
-			end
-
-			-- Round ended: clear all NPCs so the next round starts clean
-			for id in npcs do
-				NPCManager.despawn(id)
+			if elapsed >= WAVE_TIMEOUT then
+				timedOut = true
+				break
 			end
 		end
-	end)
+
+		if not isRoundActive() then
+			table.insert(results, { waveNum = waveNum, status = "ABORTED", clearTime = nil, isBossWave = waveDef.isBoss })
+			NPCManager.clearAll()
+			break
+		end
+
+		local clearTime = tick() - startTime
+		if timedOut then
+			print(`[NPCManager] Wave {waveNum} TIMEOUT at {math.floor(clearTime)}s with stragglers`)
+			fireWaveState(waveNum, STATE_TIMEOUT, { coinReward = 0, isBossWave = waveDef.isBoss })
+			NPCManager.clearAll() -- despawn stragglers so the rest period is calm
+			table.insert(results, { waveNum = waveNum, status = "TIMEOUT", clearTime = clearTime, isBossWave = waveDef.isBoss })
+		else
+			print(`[NPCManager] Wave {waveNum} CLEARED in {math.floor(clearTime)}s`)
+			fireWaveState(waveNum, STATE_CLEARED, { coinReward = waveDef.coinReward, clearTime = clearTime, isBossWave = waveDef.isBoss })
+			onWaveCleared(waveNum, waveDef.coinReward)
+			table.insert(results, { waveNum = waveNum, status = "CLEARED", clearTime = clearTime, isBossWave = waveDef.isBoss })
+		end
+
+		-- RESTING: 15s breather. Skipped after wave 3 (round ends right
+		-- after the boss wave's CLEARED/TIMEOUT, no rest needed).
+		if waveNum < NUM_WAVES then
+			for sec = REST_DURATION, 1, -1 do
+				if not isRoundActive() then break end
+				fireWaveState(waveNum, STATE_RESTING, { secondsLeft = sec, nextWave = waveNum + 1 })
+				task.wait(1)
+			end
+		end
+	end
+
+	-- Final cleanup: any straggler NPCs (e.g. a Boss whose death animation
+	-- is mid-flight when the loop exits) are despawned so the intermission
+	-- starts visually clean.
+	NPCManager.clearAll()
+	return results
 end
 
 -- Cleanup helper: kill all NPCs (called on round end so they don't bleed

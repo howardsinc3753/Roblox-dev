@@ -24,15 +24,25 @@ local state: RoundState = {
 	scores = {},
 }
 
-local ROUND_DURATION = 120 -- seconds
+-- Sprint 6: round duration is now driven by the wave sequence, not a
+-- strict per-round timer. ROUND_SAFETY_CAP is the hard ceiling — if the
+-- wave sequence somehow hangs (NPCs unreachable, infinite loop, etc.)
+-- the round is force-ended after this many seconds. In normal play the
+-- onActivePhase callback returns long before this fires (3 waves with
+-- 15s rests typically completes in 100-150s).
+local ROUND_SAFETY_CAP = 240
 local INTERMISSION_DURATION = 15 -- seconds
 
--- Callbacks set by init.server.luau
+-- Callbacks set by init.server.luau. onActivePhase blocks the round loop
+-- until the wave sequence finishes (or the safety cap forces state.active
+-- = false, which onActivePhase observes via RoundManager.isActive()).
 local onRoundStart: (() -> ())?
+local onActivePhase: (() -> ())?
 local onRoundEnd: (() -> ())?
 
-function RoundManager.setCallbacks(startCb: () -> (), endCb: () -> ())
+function RoundManager.setCallbacks(startCb: () -> (), activeCb: () -> (), endCb: () -> ())
 	onRoundStart = startCb
+	onActivePhase = activeCb
 	onRoundEnd = endCb
 end
 
@@ -147,7 +157,11 @@ function RoundManager.startLoop()
 			-- Start round
 			state.roundNumber += 1
 			state.active = true
-			state.timeRemaining = ROUND_DURATION
+			-- timeRemaining now represents the safety-cap clock. NPCManager's
+			-- wave sequence is what actually drives round duration; this just
+			-- guarantees a worst-case bound so a stuck wave doesn't deadlock
+			-- the round loop forever.
+			state.timeRemaining = ROUND_SAFETY_CAP
 
 			-- Reset scores
 			for userId, score in state.scores do
@@ -161,10 +175,30 @@ function RoundManager.startLoop()
 				onRoundStart()
 			end
 
-			-- Countdown
-			while state.timeRemaining > 0 and state.active do
-				task.wait(1)
-				state.timeRemaining -= 1
+			-- Background safety-cap timer. Counts down ROUND_SAFETY_CAP and
+			-- forces state.active = false if it hits zero — onActivePhase
+			-- watches isActive() and bails out, ending the round cleanly.
+			-- roundGen guards against the spawned task lingering after a new
+			-- round starts (paranoia; in practice it always exits at end).
+			local roundGen = state.roundNumber
+			task.spawn(function()
+				while state.active and state.roundNumber == roundGen do
+					task.wait(1)
+					if state.roundNumber ~= roundGen then return end
+					state.timeRemaining = math.max(0, state.timeRemaining - 1)
+					if state.timeRemaining <= 0 and state.active then
+						warn(`[RoundManager] Round {roundGen} hit safety cap; forcing end`)
+						state.active = false
+						return
+					end
+				end
+			end)
+
+			-- Active phase: blocks until wave sequence completes (or until the
+			-- safety cap above flips state.active). onActivePhase MUST honor
+			-- isActive() to bail out early — see NPCManager.runWaveSequence.
+			if onActivePhase then
+				onActivePhase()
 			end
 
 			-- End round

@@ -394,18 +394,22 @@ function CombatManager.findNPCsInCone(npcStates: { any }, origin: Vector3, direc
 	return result
 end
 
--- Find all players within radius of a position
+-- Find all players within radius of a position. Skips Lair players for the
+-- same reason the cone helpers do: combat effects (damage AoE, heal pulse)
+-- shouldn't cross the safe-zone boundary in either direction.
 function CombatManager.findPlayersInRadius(center: Vector3, radius: number, exclude: Player?): { Player }
 	local result: { Player } = {}
 	for _, otherPlayer in Players:GetPlayers() do
 		if otherPlayer ~= exclude then
 			local otherState = playerStates[otherPlayer.UserId]
 			if otherState and otherState.alive then
-				local character = otherPlayer.Character
-				if character and character.PrimaryPart then
-					local dist = (character.PrimaryPart.Position - center).Magnitude
-					if dist <= radius then
-						table.insert(result, otherPlayer)
+				if not ZoneManager.isPlayerInLair(otherPlayer) then
+					local character = otherPlayer.Character
+					if character and character.PrimaryPart then
+						local dist = (character.PrimaryPart.Position - center).Magnitude
+						if dist <= radius then
+							table.insert(result, otherPlayer)
+						end
 					end
 				end
 			end

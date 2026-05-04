@@ -36,6 +36,12 @@ return {
 	-- Server → locked-on player: brief warning flash + tick sound so they
 	-- know an enemy is targeting them. Lets the victim dodge before the hit.
 	LockedByEnemy = "LockedByEnemy",
+	-- Sprint 6: wave state machine. Server fires when a wave transitions
+	-- between INCOMING (telegraph) → ACTIVE (fighting) → CLEARED/TIMEOUT
+	-- → RESTING (countdown to next). Drives the WaveTracker HUD on the
+	-- client so kids see structured wave progress instead of continuous
+	-- chaos. Payload is a Variant table specific to each state.
+	WaveStateChanged = "WaveStateChanged",
 
 	-- Client → Server (RemoteFunctions)
 	GetPlayerData = "GetPlayerData",

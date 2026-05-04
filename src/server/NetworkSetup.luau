@@ -31,6 +31,7 @@ local function setup()
 		RemoteNames.LockedByEnemy,
 		RemoteNames.UseShield,
 		RemoteNames.ShieldActivated,
+		RemoteNames.WaveStateChanged,
 	}
 
 	for _, name in eventNames do

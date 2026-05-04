@@ -100,6 +100,7 @@ local lockOnTargetRemote = getRemote("LockOnTarget")
 local lockedByEnemyRemote = getRemote("LockedByEnemy")
 local useShieldRemote = getRemote("UseShield")
 local shieldActivatedRemote = getRemote("ShieldActivated")
+local waveStateChangedRemote = getRemote("WaveStateChanged")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
 
 -- ================================
@@ -564,11 +565,46 @@ end
 -- ROUND SYSTEM
 -- ================================
 
+-- Sprint 6: wave state broadcaster. NPCManager fires this for each
+-- wave-state transition so the client WaveTracker HUD can render the
+-- right banner / countdown / enemy counter.
+local function fireWaveStateChanged(waveNum: number, waveState: string, payload: any)
+	waveStateChangedRemote:FireAllClients(waveNum, waveState, payload)
+end
+
+-- Sprint 6: wave-clear coin reward. Pays out the per-wave bonus (30/50/100)
+-- to every player who participated — alive AND in the Arena (not hiding in
+-- the Lair). Lair-hider rule incentivizes engagement: rest in the Lair
+-- between waves is fine, but if you skip a wave entirely you don't earn
+-- the clear bonus.
+local function awardWaveCleared(waveNum: number, coinReward: number)
+	for _, player in Players:GetPlayers() do
+		if not CombatManager.isAlive(player) then continue end
+		if ZoneManager.isPlayerInLair(player) then continue end
+		DataManager.addCoins(player, coinReward)
+		RoundManager.recordCoins(player, coinReward) -- counts toward end-of-round summary
+		updateCoinsRemote:FireClient(player, DataManager.getCoins(player))
+		refreshLeaderstats(player)
+	end
+	print(`[Server] Wave {waveNum} cleared, awarded {coinReward} coins to participants`)
+end
+
+-- Per-round wave breakdown captured by onActivePhase, read by onRoundEnd
+-- to attach to the roundEndRemote payload. Keyed by nothing — single
+-- mutable slot since rounds are sequential. Reset in onRoundStart.
+local lastRoundWaveResults: { any } = {}
+
 RoundManager.setCallbacks(
 	-- onRoundStart
 	function()
 		local roundState = RoundManager.getState()
-		roundStartRemote:FireAllClients(roundState.roundNumber, 120)
+		-- Pass the safety cap (240s) as the round duration so the existing
+		-- HUD timer still ticks down to something. The actual round length
+		-- is now wave-driven and shorter — this just provides a worst-case
+		-- bound for the HUD display.
+		roundStartRemote:FireAllClients(roundState.roundNumber, 240)
+		-- Reset per-round wave breakdown so onRoundEnd doesn't show stale data.
+		lastRoundWaveResults = {}
 
 		-- Respawn all players
 		for _, player in Players:GetPlayers() do
@@ -585,10 +621,24 @@ RoundManager.setCallbacks(
 		updateScoreboardRemote:FireAllClients(RoundManager.getScoreboard())
 	end,
 
+	-- onActivePhase: Sprint 6 wave sequence. Blocks until 3 waves complete
+	-- (or until RoundManager's safety-cap forces state.active = false, in
+	-- which case runWaveSequence bails out via its isRoundActive() checks).
+	-- Returns the per-wave breakdown which we stash for onRoundEnd to send
+	-- in the round-end summary payload.
+	function()
+		lastRoundWaveResults = NPCManager.runWaveSequence(
+			fireWaveStateChanged,
+			RoundManager.isActive,
+			awardWaveCleared
+		)
+	end,
+
 	-- onRoundEnd: award participation + win bonus + first-win-of-day bonus.
-	-- Fire RoundEnd with per-player coins-earned data so the client can show
-	-- a "you earned X coins" summary. firstWinClaimed[userId] tells the client
-	-- whether to render the gold "FIRST WIN TODAY +50" highlight.
+	-- Fire RoundEnd with per-player coins-earned data + Sprint 6 per-wave
+	-- breakdown so the client can show "you earned X coins" + the wave-by-
+	-- wave recap. firstWinClaimed[userId] drives the gold "FIRST WIN TODAY"
+	-- highlight.
 	function()
 		local winner = RoundManager.getWinner()
 		local scoreboard = RoundManager.getScoreboard()
@@ -600,10 +650,18 @@ RoundManager.setCallbacks(
 
 		for _, player in Players:GetPlayers() do
 			-- Start with everything the kid earned during the round (kill
-			-- rewards, NPC kill rewards). Without this, the summary used to
-			-- show "0 coins earned" when the kid spent the whole round
-			-- killing NPCs because only post-round bonuses were counted.
-			local earned = RoundManager.getRoundCoins(player) + PARTICIPATION
+			-- rewards, NPC kill rewards, Sprint 6 wave-clear bonuses). Without
+			-- this, the summary used to show "0 coins earned" when the kid
+			-- spent the whole round killing NPCs because only post-round
+			-- bonuses were counted.
+			--
+			-- Lair-stayers don't get PARTICIPATION — the safe zone is for
+			-- managing your dragon, not earning passively. In-round coins
+			-- still count (they'll just be 0 for an AFK Lair camper). The
+			-- WIN_BONUS / first-win paths below are unreachable from the
+			-- Lair anyway since you can't score kills from there.
+			local participation = if ZoneManager.isPlayerInLair(player) then 0 else PARTICIPATION
+			local earned = RoundManager.getRoundCoins(player) + participation
 			if winner and winner.UserId == player.UserId then
 				earned += WIN_BONUS
 				-- Stack the first-win-of-day bonus on top of the regular win bonus.
@@ -617,8 +675,9 @@ RoundManager.setCallbacks(
 			end
 			-- addCoins only adds the post-round bonuses (participation + win +
 			-- first-win) — the in-round earnings were already added live as the
-			-- kid scored kills. So we add (earned - roundCoins) here, but the
-			-- DISPLAYED `earned` is the full total including in-round.
+			-- kid scored kills (and via wave-clear payouts). So we add the
+			-- delta here, but the DISPLAYED `earned` is the full total
+			-- including in-round.
 			local postRoundBonus = earned - RoundManager.getRoundCoins(player)
 			DataManager.addCoins(player, postRoundBonus)
 			coinsEarnedThisRound[player.UserId] = earned
@@ -630,7 +689,8 @@ RoundManager.setCallbacks(
 			if winner then winner.UserId else 0,
 			scoreboard,
 			coinsEarnedThisRound,
-			firstWinClaimed
+			firstWinClaimed,
+			lastRoundWaveResults -- Sprint 6: per-wave breakdown for the recap row
 		)
 	end
 )
@@ -746,11 +806,12 @@ NPCManager.setLockOnCallback(function(playerUserId: number, enemyName: string)
 	lockedByEnemyRemote:FireClient(target, 0, enemyName)
 end)
 
--- H4 fix: pass isRoundActive into both AI and wave loops so they don't run
--- during intermission (no wasted ticks, no spectral breath visuals during the
--- 15s dragon-select window).
+-- H4 fix: pass isRoundActive into the AI loop so it doesn't run during
+-- intermission (no wasted ticks, no spectral breath visuals during the
+-- 15s dragon-select window). Sprint 6: the wave loop is no longer started
+-- here — RoundManager's onActivePhase callback (above) drives waves
+-- per-round via NPCManager.runWaveSequence.
 NPCManager.startAILoop(npcDamagePlayer, RoundManager.isActive)
-NPCManager.startWaveLoop(RoundManager.isActive)
 
 -- ================================
 -- Sprint 5 Part E: PORTAL TELEPORTS
