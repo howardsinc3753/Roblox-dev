@@ -1367,10 +1367,27 @@ BossManager.setOnDefeatCallback(function(bossType: string, contributions: { [num
 	-- LairAtmosphere/SoundManager pair to restore the pre-encounter
 	-- music state.
 	bossMusicStateRemote:FireAllClients(false)
-	-- Hold the death-pose model for a moment before despawning so kids
-	-- see the boss go down rather than vanishing instantly. 2 seconds
-	-- matches the wave-clear celebration window.
-	task.delay(2, function()
+
+	-- Sprint 10 Tier 2: multi-stage death sequence. Replaces the
+	-- previous "task.delay(2, despawn)" with a 3-explosion crescendo
+	-- before the model vanishes. Kid sees the boss take a beating on
+	-- the way down rather than just disappearing. Each stage fires
+	-- via the existing impact VFX path (BossAttackImpact remote)
+	-- positioned on the boss body — same explosion + camera shake
+	-- machinery already wired in Tier 1.
+	local activeBossState = BossManager.getActive()
+	local deathPosition = activeBossState and activeBossState.rootPart.Position or Vector3.zero
+	task.spawn(function()
+		-- Stage 1: small flash (0.0s)
+		bossAttackImpactRemote:FireAllClients("InfernoSlam", deathPosition)
+		task.wait(0.4)
+		-- Stage 2: bigger flash, slightly off-center (0.4s)
+		bossAttackImpactRemote:FireAllClients("InfernoSlam",
+			deathPosition + Vector3.new(math.random(-5, 5), math.random(-3, 5), math.random(-5, 5)))
+		task.wait(0.4)
+		-- Stage 3: giant final explosion (0.8s)
+		bossAttackImpactRemote:FireAllClients("InfernoSlam", deathPosition)
+		task.wait(0.6)
 		BossManager.despawn()
 	end)
 	print(`[Server] {bossType} defeated; awarded {BOSS_FLAT_PARTICIPATION} flat + {BOSS_SHARE_POOL} share across {totalDamage} total damage`)

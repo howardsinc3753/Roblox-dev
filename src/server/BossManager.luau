@@ -535,6 +535,24 @@ local function pickRandomArenaTarget(): Player?
 	return candidates[math.random(1, #candidates)]
 end
 
+-- Sprint 10 Tier 2: pre-attack charge-up window. Before each attack's
+-- ground telegraph fires, the boss visibly "charges" for 0.5s — sells
+-- the "this is intentional" beat that was missing. Implementation:
+-- intensify the boss's existing aura particles + flash the boss light
+-- via attribute mutations the client reads. For MVP we just emit a
+-- one-shot charge-up burst at the boss's body via the impact remote
+-- (reuse the explosion VFX at lower intensity, positioned on the boss).
+local CHARGE_WINDOW = 0.5
+
+local function fireChargeUp(state: BossState)
+	if impactCallback then
+		-- "ChargeUp" attackType — client renders a smaller burst on the
+		-- boss body to telegraph "incoming attack." Reuses the impact
+		-- renderer with a lower-intensity branch.
+		impactCallback("ChargeUp", state.rootPart.Position)
+	end
+end
+
 -- Inferno Slam attack execution. Picks a target's current position,
 -- fires the telegraph, waits the windup, then applies damage to anyone
 -- in the slam radius of the locked-in position. Doesn't track the
@@ -543,6 +561,19 @@ local function executeInfernoSlam(state: BossState)
 	local target = pickRandomArenaTarget()
 	if not target or not target.Character or not target.Character.PrimaryPart then return end
 	local lockedPos = target.Character.PrimaryPart.Position
+
+	-- Sprint 10 Tier 2: pre-attack charge-up. Brief VFX burst on the
+	-- boss before the ground telegraph fires — kid sees "boss is
+	-- doing something" before the danger zone appears.
+	fireChargeUp(state)
+	task.wait(CHARGE_WINDOW)
+	if not state.alive then return end
+
+	-- Re-pick target after the charge window so a kid who moved during
+	-- the charge gets the benefit. Fairness over locked-target rigidity.
+	target = pickRandomArenaTarget()
+	if not target or not target.Character or not target.Character.PrimaryPart then return end
+	lockedPos = target.Character.PrimaryPart.Position
 
 	if telegraphCallback then
 		-- Pack radius into directionOrRadius.X per the BossTelegraph
@@ -577,6 +608,11 @@ end
 -- Hitbox is a thin rectangular volume of length BEAM_LENGTH from boss
 -- along the direction unit vector.
 local function executeMagmaBeam(state: BossState)
+	-- Sprint 10 Tier 2: same pre-attack charge-up beat as Slam.
+	fireChargeUp(state)
+	task.wait(CHARGE_WINDOW)
+	if not state.alive then return end
+
 	local target = pickRandomArenaTarget()
 	if not target or not target.Character or not target.Character.PrimaryPart then return end
 	local bossPos = state.rootPart.Position

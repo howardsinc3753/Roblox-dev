@@ -29,6 +29,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local Debris = game:GetService("Debris")
 
+-- Sprint 10 visual overhaul Tier 2: camera shake on attack impact.
+-- Sibling client module — required for shake() calls in renderImpact.
+local CameraShake = require(script.Parent.CameraShake)
+
 local BossTelegraph = {}
 
 -- ===== Inferno Slam (red expanding circle on the ground) =====
@@ -199,12 +203,56 @@ local function renderBeam(originPos: Vector3, direction: Vector3, windupSec: num
 	end)
 end
 
--- ===== On-impact explosion (Sprint 10 visual overhaul) =====
--- When an attack actually lands (post-windup), the server fires the
--- BossAttackImpact remote and we render a fire-explosion VFX at the
--- impact point + camera shake. Without this, attacks felt completely
--- non-tactile — telegraph fired, kid took damage, no visual moment.
+-- ===== On-impact explosion + charge-up (Sprint 10 visual overhaul) =====
+-- Three flavors share this renderer: full-power explosion (Slam impact,
+-- Beam terminus impact) and a smaller charge-up burst on the boss
+-- before each attack telegraph. Same VFX building blocks (fire +
+-- smoke + light) at different magnitudes, so layering reads as
+-- coherent "fire-themed boss" instead of mismatched effects.
 local function renderImpact(attackType: string, position: Vector3)
+	-- Sprint 10 Tier 2: charge-up branch. Smaller burst — boss telegraphs
+	-- "I'm winding up" via a brief fire flare on his body. No camera
+	-- shake (would compete with the actual impact shake 1.8s later).
+	if attackType == "ChargeUp" then
+		local chargePart = Instance.new("Part")
+		chargePart.Size = Vector3.new(0.1, 0.1, 0.1)
+		chargePart.Transparency = 1
+		chargePart.Anchored = true
+		chargePart.CanCollide = false
+		chargePart.CFrame = CFrame.new(position)
+		chargePart.Parent = workspace
+		Debris:AddItem(chargePart, 1.5)
+
+		local chargeAttach = Instance.new("Attachment")
+		chargeAttach.Parent = chargePart
+		local chargeFire = Instance.new("ParticleEmitter")
+		chargeFire.Texture = "rbxasset://textures/particles/fire_main.dds"
+		chargeFire.Color = ColorSequence.new(Color3.fromRGB(255, 200, 80))
+		chargeFire.Size = NumberSequence.new(4, 0.5)
+		chargeFire.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.2),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		chargeFire.Lifetime = NumberRange.new(0.4, 0.6)
+		chargeFire.Rate = 0
+		chargeFire.Speed = NumberRange.new(8, 14)
+		chargeFire.SpreadAngle = Vector2.new(180, 180)
+		chargeFire.Acceleration = Vector3.new(0, 8, 0)
+		chargeFire.Parent = chargeAttach
+		chargeFire:Emit(20) -- single burst
+
+		local chargeLight = Instance.new("PointLight")
+		chargeLight.Color = Color3.fromRGB(255, 200, 80)
+		chargeLight.Brightness = 6
+		chargeLight.Range = 25
+		chargeLight.Parent = chargePart
+		local chargeFade = TweenService:Create(chargeLight,
+			TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+			{ Brightness = 0 }
+		)
+		chargeFade:Play()
+		return
+	end
 	-- Anchored center part to host the particle emitters + light.
 	local impactPart = Instance.new("Part")
 	impactPart.Name = "BlazeImpactVFX"
@@ -266,6 +314,16 @@ local function renderImpact(attackType: string, position: Vector3)
 		{ Brightness = 0 }
 	)
 	lightTween:Play()
+
+	-- Sprint 10 Tier 2: camera shake on impact. Slam is the bigger,
+	-- heavier attack (radius hit) so it gets a more aggressive shake;
+	-- Beam terminus impact is more focused, less full-body. Both decay
+	-- over ~0.5s — long enough to feel, short enough not to nauseate.
+	if attackType == "InfernoSlam" then
+		CameraShake.shake(2.5, 0.5)
+	else
+		CameraShake.shake(1.5, 0.4)
+	end
 end
 
 -- ===== Public init: subscribes to the BossTelegraph remote =====

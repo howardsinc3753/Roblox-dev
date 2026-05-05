@@ -81,7 +81,14 @@ do
 	local bossMusicRemote = remotes:WaitForChild("BossMusicState", 10) :: RemoteEvent?
 	if bossMusicRemote then
 		bossMusicRemote.OnClientEvent:Connect(function(active: boolean)
+			-- Sprint 10 Tier 2: music + atmosphere swap together. Both
+			-- read the same BossMusicState remote so they stay
+			-- synchronized — sky tints dark red as the music shifts
+			-- to boss theme. Decoupled inside SoundManager and
+			-- LairAtmosphere so a sound-system change can't break
+			-- the visual atmosphere and vice versa.
 			SoundManager.setBossMusicActive(active)
+			LairAtmosphere.setBossActive(active)
 		end)
 	end
 end

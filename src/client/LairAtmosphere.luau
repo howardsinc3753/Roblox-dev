@@ -38,6 +38,17 @@ local LAIR_OUTDOOR_AMBIENT = Color3.fromRGB(120, 90, 160)
 local LAIR_FOG_COLOR = Color3.fromRGB(140, 90, 180)
 local LAIR_FOG_END = 800 -- closer than typical outdoor
 
+-- Sprint 10 Tier 2: boss-encounter atmosphere. Sky/ambient turns dark
+-- red when Blaze appears in the Arena, restores on victory/timeout.
+-- Layered ON TOP of the zone tint — the boss state takes priority over
+-- Lair vs. Arena for the duration of the encounter. Reads as "the sky
+-- itself reacts to the boss" without needing a custom skybox asset.
+-- Once user uploads a custom dark skybox, swap the values here.
+local BOSS_AMBIENT = Color3.fromRGB(80, 20, 20)
+local BOSS_OUTDOOR_AMBIENT = Color3.fromRGB(100, 30, 30)
+local BOSS_FOG_COLOR = Color3.fromRGB(120, 30, 20)
+local BOSS_FOG_END = 600 -- pulled in further for "closing in" feel
+
 local TWEEN_DURATION = 1.5 -- crossfade between zones, matches the music crossfade pace
 
 -- Apply a target lighting set via TweenService. Generation guard prevents
@@ -67,8 +78,25 @@ local function applyLighting(target: { Ambient: Color3, OutdoorAmbient: Color3, 
 	_ = myGen
 end
 
+-- Sprint 10 Tier 2: boss-active flag. Set by setBossActive() when the
+-- BossMusicState remote fires from the server. While active, refresh
+-- chooses the boss tint regardless of zone — the boss takes priority
+-- because Blaze spawns in the Arena and the kid is fighting him there.
+local bossActive = false
+
 local function refreshFromZone()
 	if not baseline then return end
+	-- Sprint 10 Tier 2: boss tint takes priority over zone tint.
+	-- Cleared when bossActive flips back to false (victory/timeout).
+	if bossActive then
+		applyLighting({
+			Ambient = BOSS_AMBIENT,
+			OutdoorAmbient = BOSS_OUTDOOR_AMBIENT,
+			FogColor = BOSS_FOG_COLOR,
+			FogEnd = BOSS_FOG_END,
+		})
+		return
+	end
 	local zoneAttr = player:GetAttribute("Zone")
 	-- Default to Lair if the attribute hasn't replicated yet — matches
 	-- the first-spawn behavior + LairAtmosphere shows the magical
@@ -84,6 +112,14 @@ local function refreshFromZone()
 	else
 		applyLighting(baseline)
 	end
+end
+
+-- Sprint 10 Tier 2: public toggle for boss state. Wired in
+-- init.client.luau alongside the existing BossMusicState handler so
+-- music + atmosphere swap together.
+function LairAtmosphere.setBossActive(active: boolean)
+	bossActive = active
+	refreshFromZone()
 end
 
 function LairAtmosphere.init()
