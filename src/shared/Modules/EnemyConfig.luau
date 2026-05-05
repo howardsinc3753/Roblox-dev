@@ -5,7 +5,7 @@
 
 export type EnemyStats = {
 	name: string,
-	tier: string, -- "Scout" | "Warrior" | "Boss"
+	tier: string, -- "Scout" | "Warrior" | "Boss" | "MegaBoss"
 	health: number,
 	speed: number, -- studs/sec
 	damage: number,
@@ -20,6 +20,17 @@ export type EnemyStats = {
 	-- For MVP we reuse player dragon meshes — gives variety without new assets.
 	meshAssetId: number?,
 	meshScale: number?,
+	-- Sprint 10 (post-rig): optional animation asset IDs for rigged
+	-- enemies. If meshAssetId points at a rigged Model (with Bones),
+	-- BossManager / NPCManager set up an AnimationController and play
+	-- these tracks. nil entries are skipped — graceful degradation
+	-- means Blaze can still spawn (with the rigged mesh as a static
+	-- visual) before the user has uploaded the animations.
+	animations: {
+		idle: number?,
+		charge: number?,
+		running: number?,
+	}?,
 }
 
 local Enemies: { [string]: EnemyStats } = {
@@ -97,16 +108,28 @@ local Enemies: { [string]: EnemyStats } = {
 		color = Color3.fromRGB(200, 30, 20), -- deep red signature
 		secondaryColor = Color3.fromRGB(255, 140, 40),
 		scale = 3.0,
-		-- Sprint 10 Tier 3: dedicated fierce-dragon Meshy boss model.
-		-- Replaces the Storm-dragon-upscaled placeholder. Generated from
-		-- the four-legged classic-dragon prompt (option 1: spikes,
-		-- magma veins, curved horns, spiked tail club).
-		meshAssetId = 130983798052135,
-		-- meshScale 12 worked for the upscaled Storm placeholder; the
-		-- new dedicated Meshy mesh may have a different natural size.
-		-- Tune in playtest if Blaze looks too big/small. Lowering by
-		-- 30-50% is common after a Meshy mesh swap; raising rare.
+		-- Sprint 10 Tier 3 (post-rig): RIGGED Meshy biped model. Has
+		-- proper Bone hierarchy + SkinnedMeshPart so animations from
+		-- the Meshy auto-rig export can play on it. Previous static-
+		-- mesh ID 130983798052135 is superseded; 95632774497073 is the
+		-- rigged version of the same dragon.
+		meshAssetId = 95632774497073,
+		-- meshScale: tune in playtest after the rig swap. Rigged
+		-- Meshy exports often arrive at different natural sizes than
+		-- their static counterparts. Lower if the dragon looks too big.
 		meshScale = 12,
+		-- Sprint 10 (post-rig): animation asset IDs. nil placeholders
+		-- until user uploads each Animation_*_withSkin.glb via the
+		-- Studio 3D Importer and saves them as Animation assets.
+		-- Once IDs are pasted in, BossManager's animation playback
+		-- (idle on spawn, charge on attack windup, skill optional)
+		-- comes online automatically. Until then BossManager treats
+		-- nil slots as "no animation, skip playback gracefully."
+		animations = {
+			idle = nil,    -- "Walking" anim — gentle motion while boss is stationary
+			charge = nil,  -- "Skill_01" anim (the roar) — plays on attack windup
+			running = nil, -- "Running" anim — reserved for future "boss enrages" state
+		},
 	},
 }
 

@@ -52,6 +52,15 @@ export type BossState = {
 	-- becomes unbeatable — or leaves — kid feels cheated. Lock the
 	-- snapshot here and use it for reference in death-payout share math.
 	playerCountAtSpawn: number,
+	-- Sprint 10 (post-rig): animation playback handles. Populated only
+	-- when the loaded mesh has Bones (rigged path); nil for static
+	-- meshes. AnimationController + per-track loaded Animation tracks
+	-- captured here so attack execution + idle loops can play them
+	-- without re-loading every time.
+	animator: Animator?,
+	idleTrack: AnimationTrack?,
+	chargeTrack: AnimationTrack?,
+	runningTrack: AnimationTrack?,
 }
 
 local activeBoss: BossState? = nil
@@ -103,10 +112,24 @@ local function loadBossMesh(assetId: number): Model?
 end
 
 -- Build the boss model: a large anchored root part + the upscaled mesh
--- visual welded on. Anchored because Blaze hovers at one position
--- (peer spec — center of arena, 50 studs up) and fires telegraphed
--- attacks; no chase AI = no LinearVelocity needed.
-local function buildBossModel(bossType: string, config: any, spawnPosition: Vector3): (Model, BasePart)
+-- visual welded on (static path) OR a rigged SkinnedMeshPart with
+-- AnimationController for animation playback (rigged path). Detection
+-- is done by scanning for Bone descendants in the loaded mesh.
+--
+-- Static path (legacy, used when meshAssetId points at an unrigged
+-- mesh): every BasePart welded to the body so they form a rigid
+-- assembly that moves with the anchored body.
+--
+-- Rigged path (Sprint 10 post-rig — Meshy biped export with embedded
+-- bones): the rigged Model's own root anchors itself; bones deform
+-- the SkinnedMeshPart locally. We add AnimationController + Animator
+-- so EnemyConfig.Blaze.animations IDs can play. WeldConstraint would
+-- LOCK the bones to the body and break the skinning — explicitly
+-- skipped on the rigged path.
+--
+-- Returns (model, body, animator?). Animator is non-nil only on the
+-- rigged path; callers branch on its presence to load + play tracks.
+local function buildBossModel(bossType: string, config: any, spawnPosition: Vector3): (Model, BasePart, Animator?)
 	local model = Instance.new("Model")
 	model.Name = `MegaBoss_{bossType}_{tick()}`
 
@@ -128,30 +151,90 @@ local function buildBossModel(bossType: string, config: any, spawnPosition: Vect
 	-- Mesh visual. Falls back to the placeholder body if the asset
 	-- fails to load (extreme edge case — InsertService is reliable in
 	-- production; this guards against transient outages).
+	local animator: Animator? = nil
 	local meshTemplate = loadBossMesh(config.meshAssetId)
 	if meshTemplate then
+		-- Detect rigged vs static by scanning for Bone descendants.
+		-- Bones only exist in rigged exports (Meshy biped, Avatar
+		-- Importer skinned models, etc.) so their presence is a
+		-- reliable rigged-path signal.
+		local hasBones = false
+		for _, d in meshTemplate:GetDescendants() do
+			if d:IsA("Bone") then
+				hasBones = true
+				break
+			end
+		end
+
 		if meshTemplate:IsA("Model") then
 			meshTemplate:ScaleTo(config.meshScale or 1)
 			meshTemplate:PivotTo(body.CFrame)
 		end
 		meshTemplate.Name = "BossMesh"
 		meshTemplate.Parent = model
-		-- Anchor + weld every BasePart in the mesh to the body, then
-		-- set the body Anchored. Roblox physics: an anchored assembly
-		-- where one part is anchored locks the rest via the welds.
-		-- Tint the mesh to the boss's deep-red color so even if the
-		-- source mesh was a different element (e.g. Storm dragon), it
-		-- reads visually as Blaze.
-		for _, descendant in meshTemplate:GetDescendants() do
-			if descendant:IsA("BasePart") then
-				descendant.Anchored = false
-				descendant.CanCollide = false
-				descendant.Massless = true
-				descendant.Color = config.color
-				local weld = Instance.new("WeldConstraint")
-				weld.Part0 = body
-				weld.Part1 = descendant
-				weld.Parent = descendant
+
+		if hasBones then
+			-- ===== RIGGED PATH =====
+			-- Set the rigged model's PrimaryPart so :PivotTo / position
+			-- queries work cleanly. Anchor it (boss hovers at one spot;
+			-- bones deform around the anchor via the rig). DO NOT weld
+			-- the bones to the body — welds would lock joints in place
+			-- and break skinning, freezing the mesh into a single pose.
+			local riggedRoot: BasePart? = meshTemplate.PrimaryPart
+			if not riggedRoot then
+				-- Fallback: pick the first BasePart found. Meshy exports
+				-- typically have the root mesh as the first child but
+				-- this guards against unusual export structures.
+				for _, d in meshTemplate:GetDescendants() do
+					if d:IsA("BasePart") then
+						riggedRoot = d :: BasePart
+						(meshTemplate :: Model).PrimaryPart = riggedRoot
+						break
+					end
+				end
+			end
+			if riggedRoot then
+				riggedRoot.Anchored = true
+				riggedRoot.CanCollide = false
+			end
+			-- Tint everything in the rigged mesh to the boss's deep-red
+			-- color so the visual reads as Blaze regardless of the
+			-- mesh's original color. Skinned meshes accept .Color
+			-- changes the same as static MeshParts.
+			for _, descendant in meshTemplate:GetDescendants() do
+				if descendant:IsA("BasePart") then
+					descendant.CanCollide = false
+					descendant.Color = config.color
+				end
+			end
+
+			-- AnimationController + Animator. Required for AnimationTrack
+			-- playback on non-Humanoid models. AnimationController is
+			-- the dragon-friendly alternative to Humanoid+Animator
+			-- (Humanoid would impose walking-state machinery we don't
+			-- want for an anchored boss).
+			local animController = Instance.new("AnimationController")
+			animController.Parent = model
+			animator = Instance.new("Animator")
+			animator.Parent = animController
+
+			print(`[BossManager] Rigged path: {bossType} loaded with bones, AnimationController ready`)
+		else
+			-- ===== STATIC PATH (legacy) =====
+			-- Anchor + weld every BasePart in the mesh to the body, then
+			-- set the body Anchored. Roblox physics: an anchored assembly
+			-- where one part is anchored locks the rest via the welds.
+			for _, descendant in meshTemplate:GetDescendants() do
+				if descendant:IsA("BasePart") then
+					descendant.Anchored = false
+					descendant.CanCollide = false
+					descendant.Massless = true
+					descendant.Color = config.color
+					local weld = Instance.new("WeldConstraint")
+					weld.Part0 = body
+					weld.Part1 = descendant
+					weld.Parent = descendant
+				end
 			end
 		end
 	else
@@ -257,7 +340,7 @@ local function buildBossModel(bossType: string, config: any, spawnPosition: Vect
 	model:SetAttribute("BossType", bossType)
 
 	model.Parent = workspace
-	return model, body
+	return model, body, animator
 end
 
 -- ===== Spawn / despawn =====
@@ -292,7 +375,37 @@ function BossManager.spawnBlaze(playerCount: number): BossState?
 	-- ArenaBuilder), 50 studs up. Forces players to fly to engage.
 	local spawnPosition = Vector3.new(0, 50, 0)
 
-	local model, rootPart = buildBossModel("Blaze", config, spawnPosition)
+	local model, rootPart, animator = buildBossModel("Blaze", config, spawnPosition)
+
+	-- Sprint 10 (post-rig): conditionally load animation tracks. Each
+	-- slot in config.animations is independent — a nil entry means
+	-- "user hasn't uploaded that .glb yet, skip gracefully." Once IDs
+	-- are pasted into EnemyConfig.Blaze.animations the playback wires
+	-- on automatically with no further code changes.
+	local idleTrack: AnimationTrack? = nil
+	local chargeTrack: AnimationTrack? = nil
+	local runningTrack: AnimationTrack? = nil
+	if animator and config.animations then
+		-- Capture animator in a non-nil local so the inner closure
+		-- doesn't re-widen the upvalue type back to Animator?.
+		local activeAnimator: Animator = animator
+		local function loadTrack(assetId: number?): AnimationTrack?
+			if not assetId then return nil end
+			local anim = Instance.new("Animation")
+			anim.AnimationId = `rbxassetid://{assetId}`
+			local ok, track = pcall(function()
+				return activeAnimator:LoadAnimation(anim)
+			end)
+			if not ok then
+				warn(`[BossManager] Failed to load animation {assetId}: {track}`)
+				return nil
+			end
+			return track
+		end
+		idleTrack = loadTrack(config.animations.idle)
+		chargeTrack = loadTrack(config.animations.charge)
+		runningTrack = loadTrack(config.animations.running)
+	end
 
 	local state: BossState = {
 		bossType = "Blaze",
@@ -304,8 +417,20 @@ function BossManager.spawnBlaze(playerCount: number): BossState?
 		spawnedAt = tick(),
 		damageByUser = {},
 		playerCountAtSpawn = clampedCount,
+		animator = animator,
+		idleTrack = idleTrack,
+		chargeTrack = chargeTrack,
+		runningTrack = runningTrack,
 	}
 	activeBoss = state
+
+	-- Start the idle loop on spawn. Looped + low priority so the charge
+	-- track (Action priority) overrides cleanly when the boss attacks.
+	if idleTrack then
+		idleTrack.Looped = true
+		idleTrack.Priority = Enum.AnimationPriority.Idle
+		idleTrack:Play()
+	end
 
 	print(`[BossManager] Blaze spawned. HP={maxHp} ({config.health} × {clampedCount} players)`)
 	return state
@@ -553,6 +678,15 @@ local function fireChargeUp(state: BossState)
 		-- boss body to telegraph "incoming attack." Reuses the impact
 		-- renderer with a lower-intensity branch.
 		impactCallback("ChargeUp", state.rootPart.Position)
+	end
+	-- Sprint 10 (post-rig): play the roar animation if uploaded. Action
+	-- priority so it briefly overrides the looped idle. One-shot via
+	-- :Play() — the track stops itself when the keyframes complete; if
+	-- it's longer than CHARGE_WINDOW + windup, the next attack call
+	-- restarts it cleanly.
+	if state.chargeTrack then
+		state.chargeTrack.Priority = Enum.AnimationPriority.Action
+		state.chargeTrack:Play()
 	end
 end
 
