@@ -126,7 +126,7 @@ local Enemies: { [string]: EnemyStats } = {
 		-- comes online automatically. Until then BossManager treats
 		-- nil slots as "no animation, skip playback gracefully."
 		animations = {
-			idle = nil,                   -- "Walking" anim — gentle motion while boss is stationary
+			idle = 122659583547963,       -- "Walking" anim — gentle motion while boss is stationary
 			charge = 136071180911795,     -- "Skill_01" anim (the roar) — plays on attack windup
 			running = nil,                -- "Running" anim — reserved for future "boss enrages" state
 		},
