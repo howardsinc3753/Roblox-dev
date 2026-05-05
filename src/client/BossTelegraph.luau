@@ -32,6 +32,9 @@ local Debris = game:GetService("Debris")
 -- Sprint 10 visual overhaul Tier 2: camera shake on attack impact.
 -- Sibling client module — required for shake() calls in renderImpact.
 local CameraShake = require(script.Parent.CameraShake)
+-- Sprint 10 Tier 3: boss roar audio on charge-up moments. Layered with
+-- the visual flare so kids hear AND see the boss winding up.
+local SoundManager = require(script.Parent.SoundManager)
 
 local BossTelegraph = {}
 
@@ -251,6 +254,11 @@ local function renderImpact(attackType: string, position: Vector3)
 			{ Brightness = 0 }
 		)
 		chargeFade:Play()
+		-- Sprint 10 Tier 3: boss roar audio on each charge-up. Tells the
+		-- kid "BOSS IS WINDING UP" via the boss's "voice," not just the
+		-- ground telegraph. Keeps the encounter audibly alive between
+		-- the fanfare-on-spawn and the impact thuds.
+		SoundManager.play("BossRoar")
 		return
 	end
 	-- Anchored center part to host the particle emitters + light.

@@ -262,7 +262,24 @@ local function handleBossIncoming(payload: any)
 	-- weight. Saturation cranked higher.
 	setPanelTheme(Color3.fromRGB(180, 20, 20), Color3.fromRGB(255, 200, 200))
 	showSubtitle("APPEARS!", 4)
-	SoundManager.play("RoundStart") -- repurpose as fanfare for boss arrival
+	-- Sprint 10 Tier 3: layered audio cues for the spawn moment. Wolf
+	-- howl on top of the existing fanfare reads as "ancient creature
+	-- summoned" — kids' ears pick up the howl over the fanfare's
+	-- noise. Lightning crack stinger 0.3s later for the dust-puff
+	-- impact moment (server fired the visual via BossAttackImpact at
+	-- the spawn site). All assets are pitched/repurposed placeholders
+	-- in SoundManager.SOUNDS — TODO: replace IDs with custom
+	-- howl/thunderclap/roar samples when uploaded.
+	SoundManager.play("RoundStart")
+	SoundManager.play("BossSpawnHowl")
+	task.delay(0.3, function()
+		SoundManager.play("BossLightningCrack")
+	end)
+	-- Boss roar follows the lightning crack — completes the arrival
+	-- sequence. Howl → thunder → roar reads as a magical summoning.
+	task.delay(0.8, function()
+		SoundManager.play("BossRoar")
+	end)
 end
 
 local function handleBossWarning(payload: any)

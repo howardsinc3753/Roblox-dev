@@ -18,6 +18,19 @@ local SOUNDS: { [string]: { id: string, volume: number, pitch: number } } = {
 	RoundEnd = { id = "rbxassetid://9066114566", volume = 1.5, pitch = 0.7 }, -- 8bit explosion (SFX) low pitch
 	Coin = { id = "rbxassetid://9114444008", volume = 0.8, pitch = 2.5 }, -- Fire Whoosh pitched up as ding
 	WingFlap = { id = "rbxassetid://9113081793", volume = 0.5, pitch = 0.4 }, -- Airy Whoosh low pitch as flap
+	-- Sprint 10 Tier 3: boss-fight one-shot SFX. Asset IDs are
+	-- placeholders pitched/repurposed from existing assets — TODO
+	-- replace with custom-uploaded howl/roar samples when user has
+	-- them. Each entry's `id` field is what to swap.
+	-- Wolf howl placeholder: low-pitched explosion as proxy "howl."
+	-- TODO: replace with rbxassetid://<your-howl-asset-id>
+	BossSpawnHowl = { id = "rbxassetid://9120705982", volume = 2.5, pitch = 0.5 },
+	-- Boss roar placeholder: low-pitched explosion + slight pitch shift
+	-- distinct from the howl. TODO: replace with custom roar asset.
+	BossRoar = { id = "rbxassetid://9120705982", volume = 2.0, pitch = 0.4 },
+	-- Lightning crack on spawn: sharp high-pitched explosion as proxy.
+	-- TODO: replace with actual thunderclap asset.
+	BossLightningCrack = { id = "rbxassetid://9066114566", volume = 2.5, pitch = 0.7 },
 	-- Sprint 7: deliberate-purchase chime. The existing "Coin" sound fires
 	-- on every UpdateCoins event (kill rewards, wave bonuses, daily login,
 	-- etc.) so it's noisy and doesn't read as a "you spent something" beat.
@@ -129,10 +142,19 @@ end
 -- avoids start/stop pop and gives a smooth audio transition between zones.
 local LAIR_MUSIC_ID = "rbxassetid://83298024686703" -- Rainy Window (user-Got'd)
 local ARENA_MUSIC_ID = "rbxassetid://137677840690864" -- Drinking Horns (DistrokidOfficial)
+-- Sprint 10 Tier 3: dedicated boss music track. Currently points at the
+-- arena music as a fallback so something plays even before the user
+-- uploads a real boss theme — pitch shift in setBossMusicActive still
+-- adds the "this matters" cue. TODO: replace with rbxassetid://<your-
+-- boss-track-id> once a custom track is available. Leaving it
+-- pointing at arena music means the swap pattern works end-to-end now;
+-- swapping the constant is a single-line change later.
+local BOSS_MUSIC_ID = "rbxassetid://137677840690864"
 local MUSIC_VOLUME = 0.25
 
 local lairMusic: Sound? = nil
 local arenaMusic: Sound? = nil
+local bossMusic: Sound? = nil
 
 function SoundManager.startMusic()
 	if lairMusic then return end -- already started
@@ -152,13 +174,32 @@ function SoundManager.startMusic()
 	arenaMusic.Looped = true
 	arenaMusic.Parent = SoundService
 	arenaMusic:Play()
+
+	-- Sprint 10 Tier 3: dedicated boss music track, silent until the
+	-- BossMusicState remote flips it on. Looped so it cycles through
+	-- the encounter regardless of length. Pre-instantiated alongside
+	-- the other tracks so setBossMusicActive doesn't need to deal with
+	-- streaming/loading delays mid-encounter.
+	bossMusic = Instance.new("Sound")
+	bossMusic.Name = "BossMusic"
+	bossMusic.SoundId = BOSS_MUSIC_ID
+	bossMusic.Volume = 0
+	bossMusic.PlaybackSpeed = 1.1 -- slight pitch up by default for "intensity"
+	bossMusic.Looped = true
+	bossMusic.Parent = SoundService
+	bossMusic:Play()
 end
 
 -- Smoothly crossfade between Lair and Arena tracks based on whether the
 -- player is currently in the Lair zone. Called from init.client.luau
 -- Heartbeat with dt so the fade is frame-rate-independent.
+-- Sprint 10 Tier 3: short-circuits while bossMusicActive is true so
+-- setBossMusicActive's tweens aren't overwritten. The boss music owns
+-- the audio bed during an encounter; zone crossfade resumes once the
+-- boss is defeated/timed out.
 function SoundManager.setZone(isInLair: boolean, dt: number)
 	if not lairMusic or not arenaMusic then return end
+	if bossMusicActive then return end -- boss owns audio; zone fades suppressed
 	local lairTarget = if isInLair then MUSIC_VOLUME else 0
 	local arenaTarget = if isInLair then 0 else MUSIC_VOLUME
 	local alpha = 1 - math.exp(-1.5 * dt) -- ~1.3s for full crossfade
@@ -178,31 +219,50 @@ function SoundManager.setMusicVolume(volume: number)
 	if arenaMusic then arenaMusic.Volume = v end
 end
 
--- Sprint 10: boss music swap. Pitch-shifts the arena music up during
--- a Mega Boss fight so the kid's brain registers "this matters, pay
--- attention" without needing a new asset upload (peer audit guidance
--- — pitch-shift of existing music works for MVP). Reverts to baseline
--- on victory/timeout. The pitch lives on the existing arenaMusic sound
--- so the existing setZone crossfade still works correctly when the kid
--- ports back to the Lair mid-fight (boss music fades out, lair music
--- fades in — same path as normal).
+-- Sprint 10 Tier 3: dedicated boss music swap. Crossfades between the
+-- zone music (lair/arena, driven by setZone) and the dedicated boss
+-- music track. Both tracks stay PLAYING while the encounter runs;
+-- only their volumes interpolate so neither stutters on swap.
 --
--- Volume bump is intentionally NOT applied: setZone writes to
--- arenaMusic.Volume every frame for the Lair/Arena crossfade, so any
--- volume tween here would be overwritten. If a future commit wants
--- volume punch, route it via a multiplier attribute that setZone reads.
-local BOSS_PITCH = 1.3
-local BASELINE_PITCH = 1.0
+-- Implementation detail: we flag bossActive on the module so setZone
+-- can read it and refuse to ramp up arenaMusic while the boss owns
+-- the audio bed. Without this, setZone's per-Heartbeat write to
+-- arenaMusic.Volume would constantly fight setBossMusicActive's tween.
+local bossMusicActive = false
 
 function SoundManager.setBossMusicActive(active: boolean)
-	if not arenaMusic then return end
+	if not bossMusic or not arenaMusic or not lairMusic then return end
+	bossMusicActive = active
 	local TweenService = game:GetService("TweenService")
-	local targetPitch = if active then BOSS_PITCH else BASELINE_PITCH
-	local tween = TweenService:Create(arenaMusic,
-		TweenInfo.new(0.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
-		{ PlaybackSpeed = targetPitch }
+	local DURATION = 1.0 -- crossfade duration; matches the music shift "feel"
+
+	-- Boss music ramps to full volume on activate, to 0 on deactivate.
+	local bossTarget = if active then MUSIC_VOLUME else 0
+	local bossTween = TweenService:Create(bossMusic,
+		TweenInfo.new(DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+		{ Volume = bossTarget }
 	)
-	tween:Play()
+	bossTween:Play()
+
+	-- Zone tracks fade DOWN on activate (so boss music can take over)
+	-- and let setZone resume control on deactivate. While bossActive
+	-- is true, setZone short-circuits its volume writes (see below).
+	if active then
+		local lairFade = TweenService:Create(lairMusic,
+			TweenInfo.new(DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+			{ Volume = 0 }
+		)
+		lairFade:Play()
+		local arenaFade = TweenService:Create(arenaMusic,
+			TweenInfo.new(DURATION, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+			{ Volume = 0 }
+		)
+		arenaFade:Play()
+	end
+	-- On deactivate, setZone (running every frame in init.client.luau
+	-- Heartbeat) will pick up its volume targets again starting on the
+	-- next tick once bossMusicActive flips false. No explicit ramp-up
+	-- here — the existing crossfade machinery handles it cleanly.
 end
 
 function SoundManager.playAtPosition(name: string, position: Vector3)

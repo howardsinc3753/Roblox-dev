@@ -1266,9 +1266,23 @@ NPCManager.startAILoop(npcDamagePlayer, RoundManager.isActive)
 -- Sprint 10 commit 6: boss-spawned signal. Fires the BLAZE APPEARS
 -- banner state + boss music swap to all clients. Analytics fires
 -- per-player BossEncountered for everyone in the server.
-BossManager.setOnSpawnedCallback(function(bossType: string, maxHealth: number)
-	bossBannerStateRemote:FireAllClients("INCOMING", { bossType = bossType, maxHealth = maxHealth })
+BossManager.setOnSpawnedCallback(function(bossType: string, maxHealth: number, spawnPosition: Vector3)
+	-- Sprint 10 Tier 3: pass spawnPosition to the banner so the client
+	-- INCOMING handler can render the dust-puff + lightning-crack VFX
+	-- at the actual boss site instead of guessing arena-center.
+	bossBannerStateRemote:FireAllClients("INCOMING", {
+		bossType = bossType,
+		maxHealth = maxHealth,
+		spawnPosition = spawnPosition,
+	})
 	bossMusicStateRemote:FireAllClients(true)
+	-- Tier 3: spawn-drama VFX at the boss site. Reuses the impact remote
+	-- (same explosion + camera-shake machinery from Tier 1+2) for a
+	-- "boss arrival" burst. Combined with the audio cues fired
+	-- client-side from the INCOMING banner handler, kids see + hear
+	-- the boss show up, not just have him appear silently in the
+	-- middle of the arena.
+	bossAttackImpactRemote:FireAllClients("InfernoSlam", spawnPosition)
 	-- Analytics: lights up the BossEncountered event scaffolded in
 	-- Sprint 9a. Fires for every player in the server (including
 	-- Lair-stayers — they SAW the encounter happen via the banner).
@@ -1284,7 +1298,7 @@ BossManager.setOnSpawnedCallback(function(bossType: string, maxHealth: number)
 			and (data.stats.bossesDefeated or 0) == 0
 		Analytics.bossEncountered(player, bossType, roundState.roundNumber, isFirstTimeBoss)
 	end
-	print(`[Server] {bossType} spawned with {maxHealth} HP — banner + music fired`)
+	print(`[Server] {bossType} spawned with {maxHealth} HP — banner + music + spawn VFX fired`)
 end)
 
 BossManager.setDamageCallback(function(target: Player, damage: number, source: Vector3)

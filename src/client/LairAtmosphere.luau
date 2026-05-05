@@ -117,6 +117,13 @@ end
 -- Sprint 10 Tier 2: public toggle for boss state. Wired in
 -- init.client.luau alongside the existing BossMusicState handler so
 -- music + atmosphere swap together.
+--
+-- TODO (Tier 3 future): once a custom dark skybox asset is uploaded,
+-- swap the Sky instance in Lighting alongside the tint change. Pattern:
+--   local existingSky = Lighting:FindFirstChildOfClass("Sky")
+--   local boss/normalSky:Clone() / .Parent = Lighting (per state)
+-- The Ambient/Fog tint we already do here works on top of any skybox,
+-- so it's additive — custom skybox = even more atmosphere.
 function LairAtmosphere.setBossActive(active: boolean)
 	bossActive = active
 	refreshFromZone()

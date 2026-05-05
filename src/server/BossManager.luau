@@ -347,9 +347,12 @@ end
 -- BossManager.spawnBlaze, used by init.server.luau to broadcast the
 -- "BLAZE APPEARS" banner + boss-music swap to clients. Same set-once
 -- pattern as the other callbacks.
-local onSpawnedCallback: ((bossType: string, maxHealth: number) -> ())? = nil
+-- Sprint 10 Tier 3: signature extended with spawnPosition so the
+-- spawn-drama VFX (dust puff + lightning crack visual) can render at
+-- the boss's actual spawn site rather than guessing.
+local onSpawnedCallback: ((bossType: string, maxHealth: number, spawnPosition: Vector3) -> ())? = nil
 
-function BossManager.setOnSpawnedCallback(cb: (bossType: string, maxHealth: number) -> ())
+function BossManager.setOnSpawnedCallback(cb: (bossType: string, maxHealth: number, spawnPosition: Vector3) -> ())
 	onSpawnedCallback = cb
 end
 
@@ -685,7 +688,7 @@ function BossManager.spawnBlaze(playerCount: number): BossState?
 		-- a slow callback (e.g. the BossBannerState fire-all-clients
 		-- has to serialize) doesn't delay the AI startup.
 		if onSpawnedCallback then
-			onSpawnedCallback(state.bossType, state.maxHealth)
+			onSpawnedCallback(state.bossType, state.maxHealth, state.rootPart.Position)
 		end
 	end
 	return state
