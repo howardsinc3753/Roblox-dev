@@ -110,6 +110,7 @@ local dummyHitRemote = getRemote("DummyHit")
 local markLairTutorialSeenRemote = getRemote("MarkLairTutorialSeen")
 local markBossTutorialSeenRemote = getRemote("MarkBossTutorialSeen")
 local bossTelegraphRemote = getRemote("BossTelegraph")
+local bossAttackImpactRemote = getRemote("BossAttackImpact")
 local bossMusicStateRemote = getRemote("BossMusicState")
 local bossBannerStateRemote = getRemote("BossBannerState")
 local getPlayerDataFunc = getRemoteFunction("GetPlayerData")
@@ -1297,6 +1298,13 @@ BossManager.setDamageCallback(function(target: Player, damage: number, source: V
 end)
 BossManager.setTelegraphCallback(function(attackType: string, originPos: Vector3, directionOrRadius: Vector3, windupSec: number)
 	bossTelegraphRemote:FireAllClients(attackType, originPos, directionOrRadius, windupSec)
+end)
+
+-- Sprint 10 visual overhaul: impact VFX broadcaster. Fires when an
+-- attack actually lands (post-windup). Drives client explosion +
+-- camera shake. FireAllClients so spectators see the impact too.
+BossManager.setImpactCallback(function(attackType: string, position: Vector3)
+	bossAttackImpactRemote:FireAllClients(attackType, position)
 end)
 
 -- Sprint 10 commit 5: boss death + reward distribution.

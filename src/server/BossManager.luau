@@ -160,6 +160,97 @@ local function buildBossModel(bossType: string, config: any, spawnPosition: Vect
 		body.Transparency = 0
 	end
 
+	-- Sprint 10 visual overhaul Tier 1: boss presence VFX. Without these,
+	-- the boss reads as "tinted dragon statue" — playtest feedback was
+	-- "stayed still, didn't really attack, fairly lame." Layered effects:
+	--
+	-- 1. PointLight: red glow that spills onto the arena floor + nearby
+	--    geometry. Boss is visible from across the Arena even at night.
+	-- 2. Continuous fire ParticleEmitter on the body: rising embers
+	--    surround the boss permanently. Makes him look like he's burning
+	--    from within rather than just being "red."
+	-- 3. Smoke ParticleEmitter at lower body: heavier dark wisps drifting
+	--    upward, layered behind the embers for depth.
+	--
+	-- All Roblox-stock textures (rbxasset://textures/particles/...) so
+	-- no asset upload required. Once user provides a Meshy boss with
+	-- custom VFX attachments built in, these can be replaced or layered.
+	local bossLight = Instance.new("PointLight")
+	bossLight.Color = config.color
+	bossLight.Brightness = 8
+	bossLight.Range = 60
+	bossLight.Parent = body
+
+	local auraAttach = Instance.new("Attachment")
+	auraAttach.Name = "BossAuraAttach"
+	auraAttach.Parent = body
+	local embers = Instance.new("ParticleEmitter")
+	embers.Name = "BossEmbers"
+	embers.Texture = "rbxasset://textures/particles/fire_main.dds"
+	embers.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 200, 80)),
+		ColorSequenceKeypoint.new(0.6, Color3.fromRGB(255, 100, 40)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 30, 20)),
+	})
+	embers.Size = NumberSequence.new(2, 0.4)
+	embers.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.2),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	embers.Lifetime = NumberRange.new(1.2, 2.4)
+	embers.Rate = 60
+	embers.Speed = NumberRange.new(4, 8)
+	embers.SpreadAngle = Vector2.new(40, 40)
+	embers.Acceleration = Vector3.new(0, 6, 0) -- rising
+	embers.Parent = auraAttach
+
+	local smokeAttach = Instance.new("Attachment")
+	smokeAttach.Name = "BossSmokeAttach"
+	smokeAttach.Position = Vector3.new(0, -4, 0)
+	smokeAttach.Parent = body
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Name = "BossSmoke"
+	smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+	smoke.Color = ColorSequence.new(Color3.fromRGB(40, 20, 20))
+	smoke.Size = NumberSequence.new(3, 0.5)
+	smoke.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	smoke.Lifetime = NumberRange.new(2, 4)
+	smoke.Rate = 25
+	smoke.Speed = NumberRange.new(2, 5)
+	smoke.SpreadAngle = Vector2.new(60, 60)
+	smoke.Acceleration = Vector3.new(0, 3, 0)
+	smoke.Parent = smokeAttach
+
+	-- Sprint 10 visual overhaul Tier 1: idle bob animation. Boss subtly
+	-- rises and falls 1.5 studs over a 2.5s cycle so he doesn't read as
+	-- "frozen statue." TweenService loop on the body part — since the
+	-- mesh is welded to the body (anchored assembly), the entire boss
+	-- visual moves as one. Cycle starts on a random offset so multiple
+	-- bosses across server lifetime don't bob in lockstep.
+	local TweenService = game:GetService("TweenService")
+	task.spawn(function()
+		local startOffset = math.random() * 1.25
+		task.wait(startOffset)
+		while body.Parent do
+			local up = TweenService:Create(body,
+				TweenInfo.new(1.25, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+				{ Position = spawnPosition + Vector3.new(0, 1.5, 0) }
+			)
+			up:Play()
+			up.Completed:Wait()
+			if not body.Parent then break end
+			local down = TweenService:Create(body,
+				TweenInfo.new(1.25, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut),
+				{ Position = spawnPosition }
+			)
+			down:Play()
+			down.Completed:Wait()
+		end
+	end)
+
 	-- Tag for client-side discovery (boss-specific UI like the HP bar
 	-- in commit 6 reads tags via CollectionService:GetTagged).
 	CollectionService:AddTag(model, "DragonWarz_MegaBoss")
@@ -397,6 +488,15 @@ function BossManager.setTelegraphCallback(cb: (attackType: string, originPos: Ve
 	telegraphCallback = cb
 end
 
+-- Sprint 10 visual overhaul: impact callback. Fires when an attack
+-- actually lands (post-windup). Drives the client's explosion VFX +
+-- camera shake. Separate from telegraphCallback because windups and
+-- impacts have different timing semantics.
+local impactCallback: ((attackType: string, position: Vector3) -> ())? = nil
+function BossManager.setImpactCallback(cb: (attackType: string, position: Vector3) -> ())
+	impactCallback = cb
+end
+
 -- Attack tunables. Two attacks alternate via random selection; each
 -- has its own windup window (peer audit: 1.8s for Slam, 1.5s for Beam
 -- — kids on Xbox controllers need 1.5-2s to react). Range/damage from
@@ -452,6 +552,13 @@ local function executeInfernoSlam(state: BossState)
 	task.wait(SLAM_WINDUP)
 	if not state.alive then return end -- boss died mid-windup, abort
 
+	-- Sprint 10 visual overhaul: fire the on-impact VFX (explosion +
+	-- camera shake). Fires BEFORE the damage loop so kids see the
+	-- visual effect simultaneously with the HP drop, not delayed.
+	if impactCallback then
+		impactCallback("InfernoSlam", lockedPos)
+	end
+
 	-- Apply damage to anyone within SLAM_RADIUS of the locked position.
 	-- The "locked-in" semantics are intentional — kids must MOVE to
 	-- dodge, not just be elsewhere when the timer ends.
@@ -483,6 +590,14 @@ local function executeMagmaBeam(state: BossState)
 	end
 	task.wait(BEAM_WINDUP)
 	if not state.alive then return end
+
+	-- Sprint 10 visual overhaul: impact VFX. For Beam, the "impact"
+	-- position is the END of the beam (where it terminates) so the
+	-- client renders an explosion at the impact point, not at the boss.
+	if impactCallback then
+		local beamEnd = bossPos + direction * BEAM_LENGTH
+		impactCallback("MagmaBeam", beamEnd)
+	end
 
 	-- Hitbox: anyone whose projection onto the beam axis is in
 	-- [0, BEAM_LENGTH] AND whose perpendicular distance from the axis

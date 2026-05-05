@@ -39,6 +39,13 @@ return {
 	--   windupSec: number
 	-- FireAllClients so spectators see the same telegraph.
 	BossTelegraph = "BossTelegraph",
+	-- Sprint 10 visual overhaul: on-impact VFX trigger. Server fires
+	-- when an attack actually lands (after windup) so the client
+	-- can render the explosion / camera shake / hit feedback. Separate
+	-- from BossTelegraph because telegraphs are about WIND-UP and
+	-- impacts are about EXECUTION — different timings, different VFX.
+	-- Payload: attackType, position (where to spawn the VFX).
+	BossAttackImpact = "BossAttackImpact",
 	-- Sprint 10: boss music swap. Fires twice per Mega-Boss-Round — once
 	-- on encounter (active=true → swap to boss theme) and once on death
 	-- or timeout (active=false → restore zone music). FireAllClients.

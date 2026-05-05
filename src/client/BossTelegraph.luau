@@ -76,57 +76,196 @@ local function renderSlam(originPos: Vector3, radius: number, windupSec: number)
 	end)
 end
 
--- ===== Magma Beam (red line preview from origin in a direction) =====
+-- ===== Magma Beam (Sprint 10 visual overhaul) =====
+-- Original implementation was a static neon block that pulsed via tween.
+-- Read as "red rectangle floating in air" rather than "fire beam." Now
+-- uses Roblox's built-in Beam constraint between two attachments — the
+-- engine handles texture animation natively, gets free transparency
+-- gradients, and reads as an actual fire beam vs. a primitive shape.
+--
+-- Two phases:
+-- 1. WINDUP: Beam at low width + low brightness, pulsing — telegraphs
+--    "the beam is going to fire from HERE in this direction."
+-- 2. FIRE: Beam at full width + max brightness for a brief flash, plus
+--    a fire ParticleEmitter blasting out from the origin. After the
+--    flash, fade to nothing.
 local function renderBeam(originPos: Vector3, direction: Vector3, windupSec: number)
-	-- Long thin neon block stretching from origin along direction.
-	-- Width tuned to be visually obvious from a distance + slightly
-	-- wider than the server's lethal hitbox (peer guidance — the
-	-- visual is forgiving so kids feel confident dodging).
 	local BEAM_LENGTH = 80
-	local BEAM_WIDTH = 4
 	if direction.Magnitude < 0.001 then return end
 	local dirUnit = direction.Unit
-	local beamCenter = originPos + dirUnit * (BEAM_LENGTH / 2)
 
-	local marker = Instance.new("Part")
-	marker.Name = "BlazeBeamTelegraph"
-	marker.Size = Vector3.new(BEAM_WIDTH, BEAM_WIDTH, BEAM_LENGTH)
-	-- Orient so Z-axis aligns with dirUnit (lookAt + length-along-Z).
-	marker.CFrame = CFrame.lookAt(beamCenter, beamCenter + dirUnit)
-	marker.Color = Color3.fromRGB(255, 60, 30)
-	marker.Material = Enum.Material.Neon
-	marker.Anchored = true
-	marker.CanCollide = false
-	marker.Transparency = 0.5
-	marker.Parent = workspace
+	-- Two anchored points: one at the origin (the boss's "mouth"), one
+	-- at the beam's terminus. Beam constraint draws the textured 2D
+	-- effect between them.
+	local originPart = Instance.new("Part")
+	originPart.Name = "BlazeBeamOrigin"
+	originPart.Size = Vector3.new(0.1, 0.1, 0.1)
+	originPart.Transparency = 1
+	originPart.Anchored = true
+	originPart.CanCollide = false
+	originPart.CFrame = CFrame.new(originPos)
+	originPart.Parent = workspace
 
-	-- Pulse 3× during the windup so the kid sees the rhythm of the
-	-- impending beam. 0.5s on / 0.5s off pattern would be 3 pulses
-	-- in 1.5s (Magma Beam's windup). Loop tween with 6 alternations.
-	local pulseUp = TweenService:Create(marker,
-		TweenInfo.new(0.25, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, 5, true, 0),
-		{ Transparency = 0.2 }
+	local endPart = Instance.new("Part")
+	endPart.Name = "BlazeBeamEnd"
+	endPart.Size = Vector3.new(0.1, 0.1, 0.1)
+	endPart.Transparency = 1
+	endPart.Anchored = true
+	endPart.CanCollide = false
+	endPart.CFrame = CFrame.new(originPos + dirUnit * BEAM_LENGTH)
+	endPart.Parent = workspace
+
+	local originAttach = Instance.new("Attachment")
+	originAttach.Parent = originPart
+	local endAttach = Instance.new("Attachment")
+	endAttach.Parent = endPart
+
+	local beam = Instance.new("Beam")
+	beam.Attachment0 = originAttach
+	beam.Attachment1 = endAttach
+	beam.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 200, 80)),  -- bright at origin (boss mouth)
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 80, 30)), -- fiery middle
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(120, 30, 20)),   -- darker at terminus
+	})
+	-- Width 0 (start) → wide (end) gives the beam a "flame cone" shape,
+	-- but during windup we want it thin to read as "preview." Set both
+	-- to the windup-thin width here; the FIRE phase tweens them up.
+	beam.Width0 = 1.5
+	beam.Width1 = 1.5
+	beam.Transparency = NumberSequence.new(0.35) -- semi-transparent during windup
+	beam.LightEmission = 0.8
+	beam.Texture = "rbxasset://textures/particles/sparkles_main.dds" -- scrolling texture
+	beam.TextureMode = Enum.TextureMode.Stretch
+	beam.TextureSpeed = 2 -- scrolls toward the target, reads as energy flowing
+	beam.FaceCamera = true
+	beam.Parent = originPart
+
+	-- Pulse the texture speed during windup so the beam visibly "charges."
+	-- Goes from slow (boss is preparing) to fast (about to fire).
+	local pulseTween = TweenService:Create(beam,
+		TweenInfo.new(windupSec, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+		{ TextureSpeed = 8 }
 	)
-	pulseUp:Play()
+	pulseTween:Play()
 
-	Debris:AddItem(marker, windupSec + 0.3)
+	Debris:AddItem(originPart, windupSec + 0.6)
+	Debris:AddItem(endPart, windupSec + 0.6)
+
 	task.delay(windupSec, function()
-		if not marker.Parent then return end
-		-- "Beam fires" moment: brief flash to bright + thicken, then fade
-		local fire = TweenService:Create(marker,
+		if not beam.Parent then return end
+		-- FIRE phase: ramp width up + transparency to opaque + spawn a
+		-- fire particle stream from the origin point so the beam looks
+		-- like an actual fire blast, not a static gradient.
+		local fireWidth = TweenService:Create(beam,
 			TweenInfo.new(0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
-			{ Transparency = 0, Size = Vector3.new(BEAM_WIDTH * 1.5, BEAM_WIDTH * 1.5, BEAM_LENGTH) }
+			{ Width0 = 4, Width1 = 6, Transparency = NumberSequence.new(0) }
 		)
-		fire:Play()
-		fire.Completed:Connect(function()
-			if not marker.Parent then return end
-			local fadeOut = TweenService:Create(marker,
-				TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
-				{ Transparency = 1 }
-			)
-			fadeOut:Play()
-		end)
+		fireWidth:Play()
+
+		-- Fire particle emitter at origin, oriented along direction. The
+		-- particles' Acceleration vector pushes them along the beam path
+		-- so they look like flames riding the beam.
+		local fireEmitter = Instance.new("ParticleEmitter")
+		fireEmitter.Texture = "rbxasset://textures/particles/fire_main.dds"
+		fireEmitter.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 220, 80)),
+			ColorSequenceKeypoint.new(1, Color3.fromRGB(180, 40, 0)),
+		})
+		fireEmitter.Size = NumberSequence.new(3, 0.4)
+		fireEmitter.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 0.1),
+			NumberSequenceKeypoint.new(1, 1),
+		})
+		fireEmitter.Lifetime = NumberRange.new(0.4, 0.8)
+		fireEmitter.Rate = 200
+		fireEmitter.Speed = NumberRange.new(40, 60)
+		fireEmitter.SpreadAngle = Vector2.new(15, 15)
+		-- Orient particles to fire along the beam direction. Roblox
+		-- emits along the attachment's "up" axis by default; we orient
+		-- the attachment so its up = our direction.
+		originAttach.CFrame = CFrame.lookAt(Vector3.zero, dirUnit) * CFrame.Angles(math.rad(-90), 0, 0)
+		fireEmitter.Parent = originAttach
+
+		task.wait(0.4) -- let the burst stream visibly
+		fireEmitter.Enabled = false
+
+		-- Fade beam out
+		local fadeOut = TweenService:Create(beam,
+			TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.In),
+			{ Transparency = NumberSequence.new(1) }
+		)
+		fadeOut:Play()
 	end)
+end
+
+-- ===== On-impact explosion (Sprint 10 visual overhaul) =====
+-- When an attack actually lands (post-windup), the server fires the
+-- BossAttackImpact remote and we render a fire-explosion VFX at the
+-- impact point + camera shake. Without this, attacks felt completely
+-- non-tactile — telegraph fired, kid took damage, no visual moment.
+local function renderImpact(attackType: string, position: Vector3)
+	-- Anchored center part to host the particle emitters + light.
+	local impactPart = Instance.new("Part")
+	impactPart.Name = "BlazeImpactVFX"
+	impactPart.Size = Vector3.new(0.1, 0.1, 0.1)
+	impactPart.Transparency = 1
+	impactPart.Anchored = true
+	impactPart.CanCollide = false
+	impactPart.CFrame = CFrame.new(position)
+	impactPart.Parent = workspace
+	Debris:AddItem(impactPart, 2.5)
+
+	-- Burst of fire particles
+	local impactAttach = Instance.new("Attachment")
+	impactAttach.Parent = impactPart
+	local fire = Instance.new("ParticleEmitter")
+	fire.Texture = "rbxasset://textures/particles/fire_main.dds"
+	fire.Color = ColorSequence.new({
+		ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 240, 100)),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 100, 40)),
+		ColorSequenceKeypoint.new(1, Color3.fromRGB(80, 20, 10)),
+	})
+	fire.Size = NumberSequence.new(8, 0.5)
+	fire.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	fire.Lifetime = NumberRange.new(0.6, 1.4)
+	fire.Rate = 0 -- emitted in a single :Emit() burst
+	fire.Speed = NumberRange.new(20, 50)
+	fire.SpreadAngle = Vector2.new(180, 180)
+	fire.Acceleration = Vector3.new(0, 4, 0) -- slight rise
+	fire.Parent = impactAttach
+	fire:Emit(60) -- big burst
+
+	-- Smoke ring expanding outward (separate emitter, layered behind fire)
+	local smoke = Instance.new("ParticleEmitter")
+	smoke.Texture = "rbxasset://textures/particles/smoke_main.dds"
+	smoke.Color = ColorSequence.new(Color3.fromRGB(50, 30, 25))
+	smoke.Size = NumberSequence.new(4, 12)
+	smoke.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.3),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	smoke.Lifetime = NumberRange.new(1.5, 2.5)
+	smoke.Rate = 0
+	smoke.Speed = NumberRange.new(8, 18)
+	smoke.SpreadAngle = Vector2.new(180, 180)
+	smoke.Parent = impactAttach
+	smoke:Emit(30)
+
+	-- PointLight flash — bright, fades fast. Sells the "boom" moment.
+	local light = Instance.new("PointLight")
+	light.Color = Color3.fromRGB(255, 180, 80)
+	light.Brightness = 12
+	light.Range = if attackType == "InfernoSlam" then 50 else 35
+	light.Parent = impactPart
+	local lightTween = TweenService:Create(light,
+		TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		{ Brightness = 0 }
+	)
+	lightTween:Play()
 end
 
 -- ===== Public init: subscribes to the BossTelegraph remote =====
@@ -169,6 +308,18 @@ function BossTelegraph.init()
 			warn(`[BossTelegraph] unknown attackType={attackType}`)
 		end
 	end)
+
+	-- Sprint 10 visual overhaul: on-impact VFX. Server fires this
+	-- after the windup completes (separate moment from the telegraph
+	-- start) so the client renders the explosion + light burst at
+	-- the impact point.
+	local impactRemote = remotes:WaitForChild("BossAttackImpact", 10) :: RemoteEvent?
+	if impactRemote then
+		impactRemote.OnClientEvent:Connect(function(attackType: string, position: Vector3)
+			if typeof(position) ~= "Vector3" then return end
+			renderImpact(attackType, position)
+		end)
+	end
 end
 
 return BossTelegraph

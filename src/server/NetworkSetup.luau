@@ -38,6 +38,7 @@ local function setup()
 		RemoteNames.MarkLairTutorialSeen,
 		RemoteNames.MarkBossTutorialSeen,
 		RemoteNames.BossTelegraph,
+		RemoteNames.BossAttackImpact,
 		RemoteNames.BossMusicState,
 		RemoteNames.BossBannerState,
 	}
