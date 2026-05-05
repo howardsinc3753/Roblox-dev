@@ -22,14 +22,16 @@ local SOUNDS: { [string]: { id: string, volume: number, pitch: number } } = {
 	-- placeholders pitched/repurposed from existing assets — TODO
 	-- replace with custom-uploaded howl/roar samples when user has
 	-- them. Each entry's `id` field is what to swap.
-	-- Wolf howl placeholder: low-pitched explosion as proxy "howl."
-	-- TODO: replace with rbxassetid://<your-howl-asset-id>
-	BossSpawnHowl = { id = "rbxassetid://9120705982", volume = 2.5, pitch = 0.5 },
-	-- Boss roar placeholder: low-pitched explosion + slight pitch shift
-	-- distinct from the howl. TODO: replace with custom roar asset.
+	-- Sprint 10 Tier 3: real wolf howl (Mc-Wolfhowl from Creator Store).
+	-- Volume 2.5 to cut through the layered fanfare on spawn. Pitch 1.0
+	-- (no shift) — this is the genuine sample, not a pitched-down
+	-- placeholder.
+	BossSpawnHowl = { id = "rbxassetid://106776794722744", volume = 2.5, pitch = 1.0 },
+	-- Boss roar: still placeholder. TODO: replace with custom roar
+	-- asset when uploaded. Pitched-down explosion as proxy until then.
 	BossRoar = { id = "rbxassetid://9120705982", volume = 2.0, pitch = 0.4 },
-	-- Lightning crack on spawn: sharp high-pitched explosion as proxy.
-	-- TODO: replace with actual thunderclap asset.
+	-- Lightning crack on spawn: still placeholder. TODO: replace with
+	-- actual thunderclap asset. Pitched-up 8-bit explosion as proxy.
 	BossLightningCrack = { id = "rbxassetid://9066114566", volume = 2.5, pitch = 0.7 },
 	-- Sprint 7: deliberate-purchase chime. The existing "Coin" sound fires
 	-- on every UpdateCoins event (kill rewards, wave bonuses, daily login,
@@ -142,14 +144,11 @@ end
 -- avoids start/stop pop and gives a smooth audio transition between zones.
 local LAIR_MUSIC_ID = "rbxassetid://83298024686703" -- Rainy Window (user-Got'd)
 local ARENA_MUSIC_ID = "rbxassetid://137677840690864" -- Drinking Horns (DistrokidOfficial)
--- Sprint 10 Tier 3: dedicated boss music track. Currently points at the
--- arena music as a fallback so something plays even before the user
--- uploads a real boss theme — pitch shift in setBossMusicActive still
--- adds the "this matters" cue. TODO: replace with rbxassetid://<your-
--- boss-track-id> once a custom track is available. Leaving it
--- pointing at arena music means the swap pattern works end-to-end now;
--- swapping the constant is a single-line change later.
-local BOSS_MUSIC_ID = "rbxassetid://137677840690864"
+-- Sprint 10 Tier 3: dedicated boss music track — "Obstacles" from
+-- Creator Store. Used during Mega Boss encounters (Blaze and future
+-- Stage 1.5 reskins). Crossfades in via setBossMusicActive when the
+-- BossMusicState remote fires from the server.
+local BOSS_MUSIC_ID = "rbxassetid://137827158863747"
 local MUSIC_VOLUME = 0.25
 
 local lairMusic: Sound? = nil

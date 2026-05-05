@@ -18,8 +18,24 @@
 local Lighting = game:GetService("Lighting")
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
+local InsertService = game:GetService("InsertService")
 
 local LairAtmosphere = {}
+
+-- Sprint 10 Tier 3: dedicated boss-encounter Sky asset (night sky).
+-- Loaded via InsertService at module init, cached for fast swap-in
+-- when boss spawns. Cleaned up + restored on boss defeat/timeout —
+-- the original Sky (whatever was in Lighting at module load) stays
+-- untouched and gets re-parented when boss state flips back to false.
+local BOSS_SKY_ASSET_ID = 90988519
+local cachedBossSky: Sky? = nil
+-- Reference to the Sky currently active in Lighting at module init.
+-- Captured so we can restore it cleanly when the boss encounter ends.
+local originalSky: Sky? = nil
+-- Live reference to the boss-Sky CLONE currently parented to Lighting.
+-- Distinct from cachedBossSky (the template) so we can destroy the
+-- in-use clone on deactivate without losing the source instance.
+local activeBossSky: Sky? = nil
 
 local player = Players.LocalPlayer
 
@@ -114,18 +130,54 @@ local function refreshFromZone()
 	end
 end
 
--- Sprint 10 Tier 2: public toggle for boss state. Wired in
+-- Sprint 10 Tier 2/3: public toggle for boss state. Wired in
 -- init.client.luau alongside the existing BossMusicState handler so
--- music + atmosphere swap together.
+-- music + atmosphere + skybox swap together.
 --
--- TODO (Tier 3 future): once a custom dark skybox asset is uploaded,
--- swap the Sky instance in Lighting alongside the tint change. Pattern:
---   local existingSky = Lighting:FindFirstChildOfClass("Sky")
---   local boss/normalSky:Clone() / .Parent = Lighting (per state)
--- The Ambient/Fog tint we already do here works on top of any skybox,
--- so it's additive — custom skybox = even more atmosphere.
+-- Three layered effects, each independent so a partial failure of one
+-- doesn't break the others:
+-- 1. Ambient + Fog tint (applyLighting via refreshFromZone)
+-- 2. Custom dark skybox swap (this function — clones cachedBossSky
+--    in, hides originalSky; reverses on deactivate)
+-- 3. Music swap (handled in SoundManager.setBossMusicActive)
+--
+-- Sky swap is temporary by design — original Sky is preserved (just
+-- re-parented out of Lighting on activate, back in on deactivate)
+-- so the published place's normal sky resumes the moment the boss
+-- encounter ends.
 function LairAtmosphere.setBossActive(active: boolean)
 	bossActive = active
+
+	if active then
+		-- Move original Sky out of Lighting (preserves it) + parent
+		-- the boss Sky clone in. Refresh originalSky in case Lighting
+		-- has been mutated by something else since init (defensive).
+		if not originalSky then
+			originalSky = Lighting:FindFirstChildOfClass("Sky")
+		end
+		if originalSky then
+			-- Park it in nil so Lighting doesn't have two Sky children
+			-- (Roblox uses the FIRST Sky child it finds; orphaning
+			-- the original keeps it alive for restoration).
+			originalSky.Parent = nil
+		end
+		if cachedBossSky and not activeBossSky then
+			activeBossSky = cachedBossSky:Clone()
+			activeBossSky.Parent = Lighting
+		end
+	else
+		-- Tear down the boss Sky clone, restore original. Order
+		-- matters: parent original BEFORE destroying clone so there's
+		-- no flicker frame with no Sky in Lighting.
+		if originalSky and not originalSky.Parent then
+			originalSky.Parent = Lighting
+		end
+		if activeBossSky then
+			activeBossSky:Destroy()
+			activeBossSky = nil
+		end
+	end
+
 	refreshFromZone()
 end
 
@@ -139,6 +191,36 @@ function LairAtmosphere.init()
 		FogColor = Lighting.FogColor,
 		FogEnd = Lighting.FogEnd,
 	}
+
+	-- Sprint 10 Tier 3: capture whatever Sky is currently in Lighting
+	-- so we can restore it after a boss encounter. The published place
+	-- has its own Sky configured (defaults, custom, or Roblox's
+	-- default skybox if neither). Storing the reference rather than
+	-- cloning means we don't accidentally orphan the live Sky during
+	-- the swap.
+	originalSky = Lighting:FindFirstChildOfClass("Sky")
+
+	-- Pre-load the boss Sky asset client-side via InsertService.
+	-- Wrapped in pcall + task.spawn so a load failure (rare —
+	-- marketplace assets are reliable) doesn't block init for the
+	-- rest of the module. Falls through cleanly to the Ambient/Fog
+	-- tint as the only boss-atmosphere effect.
+	task.spawn(function()
+		local ok, model = pcall(function()
+			return InsertService:LoadAsset(BOSS_SKY_ASSET_ID)
+		end)
+		if not ok or not model then
+			warn(`[LairAtmosphere] Failed to load boss Sky asset {BOSS_SKY_ASSET_ID}: {model}`)
+			return
+		end
+		local sky = model:FindFirstChildOfClass("Sky")
+		if sky then
+			cachedBossSky = sky:Clone() -- detach from the loaded model
+			model:Destroy() -- container no longer needed
+		else
+			warn(`[LairAtmosphere] Boss Sky asset loaded but no Sky child found`)
+		end
+	end)
 
 	-- Apply initial state based on current Zone attribute (likely Lair
 	-- since players spawn there). PlayerAdded → ZoneManager fires the

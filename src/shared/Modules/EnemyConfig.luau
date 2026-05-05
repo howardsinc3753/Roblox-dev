@@ -97,8 +97,16 @@ local Enemies: { [string]: EnemyStats } = {
 		color = Color3.fromRGB(200, 30, 20), -- deep red signature
 		secondaryColor = Color3.fromRGB(255, 140, 40),
 		scale = 3.0,
-		meshAssetId = 118836377435399, -- Storm dragon mesh, upscaled
-		meshScale = 12, -- 3-4× normal NPC visual presence (peer audit guidance)
+		-- Sprint 10 Tier 3: dedicated fierce-dragon Meshy boss model.
+		-- Replaces the Storm-dragon-upscaled placeholder. Generated from
+		-- the four-legged classic-dragon prompt (option 1: spikes,
+		-- magma veins, curved horns, spiked tail club).
+		meshAssetId = 130983798052135,
+		-- meshScale 12 worked for the upscaled Storm placeholder; the
+		-- new dedicated Meshy mesh may have a different natural size.
+		-- Tune in playtest if Blaze looks too big/small. Lowering by
+		-- 30-50% is common after a Meshy mesh swap; raising rare.
+		meshScale = 12,
 	},
 }
 
